@@ -1,0 +1,85 @@
+name: 🐛 Bug Report
+description: Something in Koshi is broken or behaves unexpectedly
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please fill in the
+        sections below — it makes triage much faster.
+
+        For **security vulnerabilities**, please do not file a public issue.
+        See [SECURITY.md](https://github.com/jsharma1105/Koshi/blob/main/SECURITY.md).
+
+  - type: input
+    id: koshi-version
+    attributes:
+      label: Koshi version
+      description: Run `koshi-mcp --version` (or `koshi-agents --version`)
+      placeholder: "0.2.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Koshi.Mcp (the MCP server)
+        - Koshi.Agents (persona installer)
+        - Koshi.Core (library)
+        - A specific MCP tool (please name in description)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client (if applicable)
+      options:
+        - Claude Code
+        - Claude Desktop
+        - GitHub Copilot CLI
+        - Cursor
+        - Windsurf
+        - Microsoft Agency CLI
+        - Other / not applicable
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / runtime
+      description: OS name and version, .NET runtime version
+      placeholder: "Windows 11 23H2, .NET 10.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. Include any error messages.
+      placeholder: |
+        Steps to reproduce:
+        1. …
+        2. …
+
+        Expected: …
+        Actual: …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / stderr
+      description: |
+        `koshi-mcp` logs to **stderr only**. Paste the relevant lines here.
+      render: shell
+    validations:
+      required: false

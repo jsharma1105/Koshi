@@ -1,0 +1,31 @@
+{
+  "name": "koshi",
+  "version": "0.2.0",
+  "description": "Koshi MCP — retrieval, context engineering, persistent memory, and quality scoring for AI agents. 100% offline.",
+  "author": {
+    "name": "Koshi Contributors"
+  },
+  "homepage": "https://github.com/jsharma1105/Koshi",
+  "repository": "https://github.com/jsharma1105/Koshi",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "rag",
+    "retrieval",
+    "context-engineering",
+    "memory",
+    "bm25",
+    "agent"
+  ],
+  "mcpServers": {
+    "koshi": {
+      "command": "koshi-mcp",
+      "args": [],
+      "env": {
+        "KOSHI_INDEX_PATH": "${workspaceFolder}",
+        "KOSHI_MEMORY_FILE": "${userHome}/.koshi/memory.json"
+      }
+    }
+  }
+}

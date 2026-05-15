@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & discussion
+    url: https://github.com/jsharma1105/Koshi/discussions
+    about: Ask questions, share use-cases, or compare notes with other Koshi users.
+  - name: 🔒 Security vulnerability
+    url: https://github.com/jsharma1105/Koshi/security/advisories/new
+    about: Report a security vulnerability privately. Do NOT file a public issue.
+  - name: 📚 Documentation
+    url: https://github.com/jsharma1105/Koshi#readme
+    about: Read the README and quick-start guide before filing an issue.

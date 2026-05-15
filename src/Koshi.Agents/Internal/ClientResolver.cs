@@ -1,0 +1,70 @@
+namespace Koshi.Agents.Internal;
+
+/// <summary>
+/// Resolves filesystem locations for client agent + MCP-config files across
+/// Windows, macOS, and Linux. Pure path math; never touches disk.
+/// </summary>
+internal static class ClientResolver
+{
+    public static string HomeDir =>
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>
+    /// Directory where Koshi personas should be written for a given client + scope.
+    /// </summary>
+    public static string AgentsDir(PersonaClient client, ScopeKind scope, string? repoRoot = null)
+    {
+        repoRoot ??= Directory.GetCurrentDirectory();
+
+        return (client, scope) switch
+        {
+            (PersonaClient.Claude, ScopeKind.User) =>
+                Path.Combine(HomeDir, ".claude", "agents"),
+            (PersonaClient.Claude, ScopeKind.Repo) =>
+                Path.Combine(repoRoot, ".claude", "agents"),
+            (PersonaClient.Copilot, ScopeKind.User) =>
+                Path.Combine(HomeDir, ".copilot", "agents"),
+            (PersonaClient.Copilot, ScopeKind.Repo) =>
+                Path.Combine(repoRoot, ".github", "copilot", "agents"),
+            _ => throw new ArgumentOutOfRangeException(nameof(client)),
+        };
+    }
+
+    /// <summary>
+    /// MCP config file the client reads on launch. (Doctor only — we never write here.)
+    /// </summary>
+    public static string McpConfigFile(PersonaClient client) => client switch
+    {
+        PersonaClient.Claude when OperatingSystem.IsWindows() =>
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Claude", "claude_desktop_config.json"),
+        PersonaClient.Claude when OperatingSystem.IsMacOS() =>
+            Path.Combine(HomeDir, "Library", "Application Support", "Claude",
+                "claude_desktop_config.json"),
+        PersonaClient.Claude =>
+            Path.Combine(HomeDir, ".config", "Claude", "claude_desktop_config.json"),
+
+        PersonaClient.Copilot =>
+            Path.Combine(HomeDir, ".copilot", "mcp_config.json"),
+
+        _ => throw new ArgumentOutOfRangeException(nameof(client)),
+    };
+
+    /// <summary>
+    /// The exact JSON snippet a user should add to their MCP config to register Koshi.
+    /// </summary>
+    public static string SuggestedMcpEntry() => """
+        "koshi": {
+          "command": "koshi-mcp",
+          "args": [],
+          "type": "stdio"
+        }
+        """;
+}
+
+internal enum ScopeKind
+{
+    User,
+    Repo,
+}

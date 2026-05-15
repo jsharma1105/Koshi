@@ -1,0 +1,71 @@
+# ----- Local-only working folder (never committed) -----
+# Marketing copy, launch prep, draft posts, anything that lives only on disk.
+_local/
+
+# ----- Sample data (never committed; users bring their own indexable content) -----
+data/
+
+# ----- .NET build artifacts -----
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
+[Bb]uildArtifacts/
+[Pp]ackages/
+[Pp]ublish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ----- NuGet -----
+*.nupkg
+*.snupkg
+.nuget/
+nupkg/
+
+# ----- Test results / coverage -----
+[Tt]estResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+coverage.opencover.xml
+*.lcov
+
+# ----- IDEs -----
+.vs/
+.vscode/
+*.code-workspace
+.idea/
+*.swp
+*.tmp
+*.log
+
+# ----- Rider -----
+_ReSharper.Caches/
+
+# ----- macOS / Windows / Linux -----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- Koshi runtime state (local indexes, memory, telemetry stores) -----
+.koshi/
+*.koshi.db
+*.koshi.cache
+
+# ----- Local secrets / env -----
+.env
+.env.local
+appsettings.Development.json
+appsettings.*.local.json
+*.pfx
+*.pem
+secrets.json
+
+# ----- Misc -----
+*.bak
+*.orig
+*.rej

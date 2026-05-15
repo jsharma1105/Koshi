@@ -1,0 +1,63 @@
+name: ✨ Feature Request
+description: Suggest a new capability or improvement
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature! Please be specific about the
+        **problem** you're trying to solve — that's what makes a great
+        feature request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the real-world workflow or pain point. Skip "Koshi should add
+        feature X" framing — start with the user need.
+      placeholder: |
+        When I work across multiple sessions, I find myself re-explaining the
+        team's coding conventions every time. I want Koshi to …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like Koshi to behave?
+      placeholder: |
+        Add a `koshi_export_memory` MCP tool that…
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you think about? Why is this one better?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Affected component
+      options:
+        - Koshi.Mcp (new tool, change to existing tool)
+        - Koshi.Agents (new command, new persona)
+        - Koshi.Core (new engine capability)
+        - Documentation
+        - CI / packaging / distribution
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contributing
+    attributes:
+      label: Are you willing to contribute?
+      options:
+        - label: I'd be willing to send a PR for this
