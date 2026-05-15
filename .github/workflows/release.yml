@@ -1,0 +1,96 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.3.0). Leave blank to use the tag.'
+        required: false
+
+permissions:
+  contents: write   # to create GitHub release
+  packages: write   # for GitHub Packages mirror (optional)
+
+jobs:
+  release:
+    name: release ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    environment: nuget-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            REF="${GITHUB_REF#refs/tags/v}"
+            echo "version=${REF}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release
+
+      - name: Pack Koshi.Mcp
+        run: |
+          dotnet pack src/Koshi.Mcp/Koshi.Mcp.csproj \
+            --no-build \
+            --configuration Release \
+            --output nupkg \
+            -p:Version=${{ steps.version.outputs.version }} \
+            --include-symbols
+
+      - name: Pack Koshi.Agents
+        run: |
+          dotnet pack src/Koshi.Agents/Koshi.Agents.csproj \
+            --no-build \
+            --configuration Release \
+            --output nupkg \
+            -p:Version=${{ steps.version.outputs.version }} \
+            --include-symbols
+
+      - name: Push to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          for pkg in nupkg/*.nupkg; do
+            dotnet nuget push "$pkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+      - name: Upload packages as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ steps.version.outputs.version }}
+          path: nupkg/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Koshi v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            nupkg/*.nupkg
+            nupkg/*.snupkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

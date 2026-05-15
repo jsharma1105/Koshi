@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Koshi.Core/Koshi.Core.csproj" />
+    <Project Path="src/Koshi.Mcp/Koshi.Mcp.csproj" />
+    <Project Path="src/Koshi.Agents/Koshi.Agents.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Koshi.Core.Tests/Koshi.Core.Tests.csproj" />
+  </Folder>
+</Solution>

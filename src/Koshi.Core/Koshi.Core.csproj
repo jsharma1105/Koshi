@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0-preview.4.26230.115" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.Ollama" Version="9.7.0-preview.1.25356.2" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.1" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26160.2" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="3.0.0-preview.26160.2" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="3.0.0-preview.26160.2" />
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.7" />
+    <!-- Pin transitive Microsoft.Bcl.Memory above the vulnerable 9.0.4 (GHSA-73j8-2gch-69rq) -->
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.8" />
+  </ItemGroup>
+
+</Project>

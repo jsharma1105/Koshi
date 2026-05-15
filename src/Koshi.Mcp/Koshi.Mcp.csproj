@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koshi.Mcp</RootNamespace>
+    <AssemblyName>koshi-mcp</AssemblyName>
+
+    <!-- Global tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>koshi-mcp</ToolCommandName>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Koshi.Mcp</PackageId>
+    <Version>0.2.0</Version>
+    <Title>Koshi MCP Server</Title>
+    <Authors>Koshi Contributors</Authors>
+    <Company>Koshi</Company>
+    <Description>Koshi (講師) is a Model Context Protocol server that brings retrieval, context engineering, persistent memory, and quality scoring to any MCP-compatible AI client (Claude Code, Copilot CLI, Cursor, Windsurf, etc.). 100% offline — no API keys, no embeddings, no cloud required.</Description>
+    <Summary>Context, Memory and Harness Engineering tools for any MCP-compatible AI client.</Summary>
+    <Copyright>Copyright (c) Koshi Contributors</Copyright>
+    <PackageTags>mcp;model-context-protocol;ai;llm;rag;retrieval;bm25;context-engineering;memory;agent;claude;copilot;cursor</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/jsharma1105/Koshi</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jsharma1105/Koshi</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>See CHANGELOG.md for release notes.</PackageReleaseNotes>
+
+    <!-- Quality / SourceLink -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>portable</DebugType>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' OR '$(TF_BUILD)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koshi.Core\Koshi.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pinned to latest stable for reproducible builds -->
+    <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Condition="Exists('..\..\LICENSE')" />
+    <None Include="..\..\CHANGELOG.md" Pack="true" PackagePath="\" Condition="Exists('..\..\CHANGELOG.md')" />
+  </ItemGroup>
+
+</Project>

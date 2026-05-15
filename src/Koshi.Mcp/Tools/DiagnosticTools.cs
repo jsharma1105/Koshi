@@ -1,0 +1,77 @@
+using System.ComponentModel;
+using System.Reflection;
+using ModelContextProtocol.Server;
+
+namespace Koshi.Mcp.Tools;
+
+/// <summary>
+/// MCP tools for diagnostics — version, health, and runtime status.
+/// </summary>
+[McpServerToolType]
+public sealed class DiagnosticTools
+{
+    private static readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+    private static readonly Lazy<string> _version = new(ReadVersion);
+
+    [McpServerTool(Name = "koshi_version"), Description(
+        "Return the Koshi MCP server version, .NET runtime version, and protocol version.")]
+    public static string Version()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Koshi MCP Server v{_version.Value}");
+        sb.AppendLine($"  .NET runtime: {Environment.Version}");
+        sb.AppendLine($"  OS: {Environment.OSVersion}");
+        sb.AppendLine($"  Process: PID {Environment.ProcessId}");
+        sb.AppendLine($"  Started: {_startedAt:u}");
+        return sb.ToString();
+    }
+
+    [McpServerTool(Name = "koshi_health"), Description(
+        "Report the runtime health and configuration of the Koshi MCP server: " +
+        "indexed corpus size, memory store status, persistence configuration, and uptime.")]
+    public static string Health()
+    {
+        var indexStatus = RetrievalTools.GetStatus();
+        var memStatus = MemoryTools.GetStatus();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"═══ Koshi Health (v{_version.Value}) ═══\n");
+
+        sb.AppendLine("  Retrieval:");
+        sb.AppendLine($"    Indexed: {(indexStatus.indexed ? "yes" : "no")}");
+        sb.AppendLine($"    Chunks:  {indexStatus.chunkCount}");
+        sb.AppendLine($"    Sources: {indexStatus.sourceCount}");
+        sb.AppendLine($"    Path:    {indexStatus.path ?? "(none)"}");
+        sb.AppendLine();
+
+        sb.AppendLine("  Memory:");
+        sb.AppendLine($"    Records:     {memStatus.count}");
+        sb.AppendLine($"    Persistence: {(memStatus.persistenceEnabled ? "enabled" : "disabled")}");
+        sb.AppendLine($"    File:        {memStatus.path ?? "(in-memory only)"}");
+        sb.AppendLine();
+
+        sb.AppendLine("  Configuration (env vars):");
+        sb.AppendLine($"    KOSHI_INDEX_PATH:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH") ?? "(unset)"}");
+        sb.AppendLine($"    KOSHI_MEMORY_FILE:  {Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE") ?? "(unset)"}");
+        sb.AppendLine();
+
+        var uptime = DateTimeOffset.UtcNow - _startedAt;
+        sb.AppendLine($"  Uptime: {uptime:hh\\:mm\\:ss}");
+        sb.AppendLine($"  GC working set: {Environment.WorkingSet / (1024 * 1024)} MB");
+
+        return sb.ToString();
+    }
+
+    private static string ReadVersion()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrEmpty(info))
+        {
+            // Strip git metadata (e.g. "0.2.0+abc123" -> "0.2.0")
+            var plus = info.IndexOf('+');
+            return plus > 0 ? info[..plus] : info;
+        }
+        return asm.GetName().Version?.ToString() ?? "0.0.0";
+    }
+}

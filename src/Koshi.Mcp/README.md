@@ -1,0 +1,491 @@
+# Koshi MCP Server
+
+> **Koshi** (講師, "instructor") is a Model Context Protocol server that brings
+> retrieval, context engineering, persistent memory, and quality scoring to any
+> MCP-compatible AI client. **100% offline. No API keys. No embeddings. No cloud.**
+
+[![NuGet](https://img.shields.io/nuget/v/Koshi.Mcp.svg)](https://www.nuget.org/packages/Koshi.Mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dot.net)
+[![MCP](https://img.shields.io/badge/MCP-1.0-blue.svg)](https://modelcontextprotocol.io)
+
+Koshi turns any MCP client (Claude Code, GitHub Copilot CLI, Cursor, Windsurf, …)
+into a context-engineering powerhouse. It chunks and indexes your codebase or
+documentation with BM25, packs context windows for optimal cache reuse, stores
+persistent facts and decisions, and scores the quality of every AI interaction.
+
+---
+
+## Table of Contents
+
+- [Why Koshi?](#why-koshi)
+- [Quick Start (60 seconds)](#quick-start-60-seconds)
+- [Client Setup](#client-setup)
+  - [Claude Desktop / Claude Code](#claude-desktop--claude-code)
+  - [GitHub Copilot CLI](#github-copilot-cli)
+  - [Cursor / Windsurf](#cursor--windsurf)
+  - [Generic MCP client](#generic-mcp-client)
+- [Available Tools (20)](#available-tools-20)
+- [Configuration](#configuration)
+- [Usage Walkthroughs](#usage-walkthroughs)
+- [How It Works](#how-it-works)
+- [Security & Privacy](#security--privacy)
+- [Comparison](#comparison)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [License](#license)
+
+---
+
+## Why Koshi?
+
+Most MCP servers do one thing: a connector for a database, a wrapper around an
+API, a single-purpose tool. **Koshi is a complete context-engineering toolkit**
+that combines four traditionally-separate capabilities:
+
+| Capability | Koshi | MCP Memory | AWS KB Retrieval | RAG SaaS |
+|------------|:-----:|:----------:|:----------------:|:--------:|
+| **BM25 retrieval over your codebase** | ✅ | ❌ | ❌ | ✅ |
+| **Token-budget-aware context packing** | ✅ | ❌ | ❌ | ❌ |
+| **Cache-optimized prompt positioning** | ✅ | ❌ | ❌ | ❌ |
+| **Typed memory (facts, decisions, patterns)** | ✅ | ⚠️ graph only | ❌ | ⚠️ |
+| **Per-team quality scoring & feedback** | ✅ | ❌ | ❌ | ❌ |
+| **Works fully offline (no API keys)** | ✅ | ✅ | ❌ | ❌ |
+| **Single binary, MIT licensed** | ✅ | ✅ | ❌ | ❌ |
+
+Koshi is a learning + production tool. Use it to:
+
+- 📚 **Index docs, RFCs, ADRs, source code** — search them inline from your AI client
+- 📝 **Remember decisions and conventions** across sessions — never re-explain context
+- 🎯 **Pack context windows optimally** — measure tokens, plan budgets, exploit caching
+- 📊 **Track quality per team** — score interactions, surface trends, get config tuning suggestions
+
+---
+
+## Quick Start (60 seconds)
+
+### Prerequisites
+
+- **[.NET 10 SDK or runtime](https://dot.net/download)** (Windows, macOS, Linux)
+
+### Install as a global tool
+
+```bash
+dotnet tool install --global Koshi.Mcp
+```
+
+This installs the `koshi-mcp` command globally. Verify with:
+
+```bash
+koshi-mcp --version    # should match the installed package version
+```
+
+### Add to your MCP client
+
+Add this to your client's MCP config (see [Client Setup](#client-setup) for paths):
+
+```json
+{
+  "mcpServers": {
+    "koshi": {
+      "command": "koshi-mcp",
+      "env": {
+        "KOSHI_INDEX_PATH": "/absolute/path/to/your/project",
+        "KOSHI_MEMORY_FILE": "/absolute/path/to/koshi-memory.json"
+      }
+    }
+  }
+}
+```
+
+Restart your MCP client. You can now ask the AI things like:
+
+> _"Use Koshi to search the codebase for how authentication works."_
+>
+> _"Remember that we use ULIDs for all entity IDs (decision)."_
+>
+> _"What did we decide about authentication last sprint?"_
+
+---
+
+## Client Setup
+
+### Claude Desktop / Claude Code
+
+Edit `claude_desktop_config.json` (or `.claude/settings.json`):
+
+| OS | Path |
+|---|---|
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "koshi": {
+      "command": "koshi-mcp",
+      "env": {
+        "KOSHI_INDEX_PATH": "/Users/you/code/my-project",
+        "KOSHI_MEMORY_FILE": "/Users/you/.koshi/memory.json"
+      }
+    }
+  }
+}
+```
+
+### GitHub Copilot CLI
+
+```bash
+copilot mcp add koshi koshi-mcp \
+  --env KOSHI_INDEX_PATH=/path/to/project \
+  --env KOSHI_MEMORY_FILE=/path/to/memory.json
+```
+
+Or add manually to `~/.copilot/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "koshi": {
+      "command": "koshi-mcp",
+      "env": {
+        "KOSHI_INDEX_PATH": "/path/to/project"
+      }
+    }
+  }
+}
+```
+
+### Cursor / Windsurf
+
+Add to `.cursor/mcp.json` (or workspace settings):
+
+```json
+{
+  "mcpServers": {
+    "koshi": {
+      "command": "koshi-mcp",
+      "env": {
+        "KOSHI_INDEX_PATH": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+### Generic MCP client
+
+Any MCP client that supports stdio transport works:
+
+```bash
+# The server reads JSON-RPC on stdin and writes responses on stdout.
+# Logs go to stderr exclusively — stdout is reserved for the protocol.
+koshi-mcp
+```
+
+### Microsoft Agency CLI
+
+[Agency](https://aka.ms/agency) wraps Copilot CLI and Claude Code with marketplace plugins. Koshi ships with a `plugin.json` manifest at the repo root, so you can:
+
+**Option A — Use Koshi as a one-shot MCP proxy** (simplest, no install):
+
+```bash
+agency mcp local --command koshi-mcp \
+  --env-var KOSHI_INDEX_PATH=C:\path\to\project \
+  --env-var KOSHI_MEMORY_FILE=C:\Users\you\.koshi\memory.json
+```
+
+**Option B — Install as a persistent Agency plugin** (from a fork/marketplace):
+
+```bash
+# Once Koshi is published to a marketplace repo:
+agency plugin install gh:owner/koshi@main
+agency copilot --plugin koshi
+```
+
+Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships both.
+
+---
+
+## Available Tools (20)
+
+### 🔍 Retrieval (5)
+
+| Tool | Purpose |
+|------|---------|
+| `koshi_index_directory` | Recursively chunk and index files from a directory (BM25). Excludes secrets, build output, hidden dirs. |
+| `koshi_index` | Index a JSON array of in-memory documents. |
+| `koshi_search` | BM25 keyword search over the indexed corpus. Auto-indexes `KOSHI_INDEX_PATH` on first call. |
+| `koshi_list_indexed` | List indexed documents with chunk counts and token totals. |
+| `koshi_clear_index` | Reset the index without restarting the server. |
+
+### 📦 Context Engineering (3)
+
+| Tool | Purpose |
+|------|---------|
+| `koshi_compile_context` | Pack system prompt + retrieval + memory + team context into a token budget using one of four positioning strategies. |
+| `koshi_token_count` | Count GPT-4 (cl100k) tokens for any text. |
+| `koshi_budget_plan` | Plan a token budget allocation across roles and show cache-prefix savings. |
+
+### 🧠 Memory (5)
+
+| Tool | Purpose |
+|------|---------|
+| `koshi_remember` | Store a typed memory (Fact / Decision / Pattern / Preference) with confidence and source. |
+| `koshi_recall` | Recall memories by topic, ranked by keyword match + recency + confidence. |
+| `koshi_memory_stats` | Counts by type, top subjects, average confidence, persistence status. |
+| `koshi_forget` | Remove all memories matching a subject. |
+| `koshi_clear_memories` | Delete every stored memory (requires `confirm=true`). |
+
+### 👥 Team & Quality (5)
+
+| Tool | Purpose |
+|------|---------|
+| `koshi_register_team` | Register a team with a custom token budget, retrieval `topK`, and quality target. |
+| `koshi_score_turn` | Score one AI interaction across retrieval, efficiency, cache, latency, and user signals. |
+| `koshi_team_dashboard` | Render a per-team dashboard with trends and recommendations. |
+| `koshi_analyze_feedback` | Analyse trends and produce concrete config-tuning suggestions. |
+| `koshi_list_teams` | List all registered teams and their average scores. |
+
+### 🩺 Diagnostics (2)
+
+| Tool | Purpose |
+|------|---------|
+| `koshi_version` | Server version, .NET runtime, OS, process and start time. |
+| `koshi_health` | Indexed corpus size, memory store status, env-var configuration, uptime, working set. |
+
+---
+
+## Configuration
+
+Koshi is configured exclusively through **environment variables** (no config files, no flags) — easy to set in any MCP client config.
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `KOSHI_INDEX_PATH` | _(unset)_ | Absolute path that `koshi_search` will auto-index on first use. Without this, callers must invoke `koshi_index_directory` explicitly. |
+| `KOSHI_MEMORY_FILE` | _(unset)_ | Absolute path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. When unset, memories live only for the current process. |
+
+**Default safety limits** (hardcoded; tweakable per-call where applicable):
+
+- Max indexed chunks: **50,000**
+- Max stored memories: **1,000**
+- Max file size for `koshi_index_directory`: **256 KB** (override per call)
+- Max files scanned: **5,000** (override per call)
+- `topK` clamped to **1–50** (search) and **1–25** (recall)
+
+---
+
+## Usage Walkthroughs
+
+### 1. Index a project and search it
+
+In your AI client, just ask:
+
+> _"Index this project and find the authentication code."_
+
+The agent will call:
+
+```
+koshi_index_directory(path="/path/to/project")  # or use KOSHI_INDEX_PATH
+koshi_search(query="authentication", topK=5)
+```
+
+You get the top 5 matching chunks with file paths, scores, and content previews.
+
+### 2. Plan a context budget before calling an LLM
+
+> _"Plan a 16K-token budget for a system prompt of 800 tokens and a 1,200-token team context."_
+
+```
+koshi_budget_plan(totalBudget=16384, systemPrompt="...", teamContext="...")
+```
+
+Output explains fixed costs, remaining budget, suggested splits, and cache savings.
+
+### 3. Remember decisions across sessions
+
+> _"Remember that we settled on Postgres for the auth service (Decision, source: arch-meeting-2026-04)."_
+
+```
+koshi_remember(
+  type="Decision",
+  subject="auth-service-database",
+  content="Use Postgres 16 with row-level security for the auth service.",
+  source="arch-meeting-2026-04",
+  confidence=0.95
+)
+```
+
+Later, in any session:
+
+> _"What database did we decide on for auth?"_
+
+```
+koshi_recall(query="auth database", type="Decision")
+```
+
+### 4. Track team quality
+
+```
+koshi_register_team(teamId="platform-eng", name="Platform Engineering",
+                    tokenBudget=16384, qualityTarget=0.75)
+
+# After each AI interaction:
+koshi_score_turn(teamId="platform-eng",
+                 retrievedChunks=5, budgetUtilization=0.78,
+                 cacheRatio=0.62, latencyMs=2400, userRating=4)
+
+# Periodically:
+koshi_team_dashboard(teamId="platform-eng")
+koshi_analyze_feedback(teamId="platform-eng")
+```
+
+The feedback loop surfaces concrete config tweaks (e.g. _"increase topK from 5 → 7,
+weakest dimension is retrieval"_).
+
+---
+
+## How It Works
+
+```
+┌────────────────────────────────────────────────────────────┐
+│       MCP Client  (Claude Code, Copilot CLI, Cursor, ...)  │
+└──────────────────────────┬─────────────────────────────────┘
+                           │ stdio (JSON-RPC 2.0)
+                           ▼
+┌────────────────────────────────────────────────────────────┐
+│       koshi-mcp  (this binary, ~40 MB self-contained)      │
+│                                                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐    │
+│  │  Retrieval   │  │   Context    │  │     Memory     │    │
+│  │  Tools (5)   │  │  Tools (3)   │  │   Tools (5)    │    │
+│  └──────┬───────┘  └──────┬───────┘  └────────┬───────┘    │
+│         │                 │                    │           │
+│         ▼                 ▼                    ▼           │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                   Koshi.Core                        │   │
+│  │  • FixedSizeChunker   (512-token windows, 50 over)  │   │
+│  │  • KeywordRetriever   (BM25 inverted index)         │   │
+│  │  • TokenCounter       (GPT-4 cl100k tokenizer)      │   │
+│  │  • ContextCompiler    (4 positioning strategies)    │   │
+│  │  • QualityScorer      (5-dimension composite score) │   │
+│  └─────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Two-stage indexing pipeline:**
+
+1. **Chunking** — `FixedSizeChunker` splits text into 512-token windows with 50-token overlap, using GPT-4's `cl100k` tokenizer for accurate counts.
+2. **BM25 indexing** — `KeywordRetriever` builds an inverted index with TF-IDF weighting (the same algorithm used by Elasticsearch / Lucene).
+
+**Why no embeddings?** Embeddings need either an API key (cost, latency, privacy)
+or a local GPU (deployment friction). BM25 ships in the binary, runs offline,
+and on the included evaluation corpus achieves **MRR 0.874 / Recall@5 0.914** —
+competitive with vector retrieval for code and documentation use-cases.
+
+---
+
+## Security & Privacy
+
+Koshi runs locally and **never** sends data to a third-party. By design:
+
+- ✅ **No network calls** — fully offline
+- ✅ **No telemetry** — no analytics, no phone-home
+- ✅ **Stdio transport only** — no listening ports
+- ✅ **Logs to stderr only** — stdout is reserved for MCP JSON-RPC
+
+**Disk-indexing safety guards** (in `koshi_index_directory`):
+
+- Hidden directories skipped (`.git`, `.aws`, `.azure`, `.ssh`, `.gnupg`, …)
+- Build output skipped (`bin`, `obj`, `node_modules`, `dist`, `target`, `.next`, …)
+- Secret patterns skipped (`.env*`, `secrets.*`, `credentials.*`, `id_rsa`, …)
+- Sensitive extensions skipped (`.pem`, `.key`, `.pfx`, `.p12`, `.crt`, `.keystore`, …)
+- Symlinks/reparse points not followed
+- Files larger than `maxFileSizeKb` (default 256 KB) skipped
+- Hard cap of `maxFiles` (default 5,000) per index operation
+
+⚠️ **Indexed content may be returned to your MCP client and the underlying LLM.**
+Review the file list with `koshi_list_indexed` after indexing if your project
+contains sensitive material.
+
+---
+
+## Comparison
+
+| Feature | Koshi | [@mcp/memory](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) | [@mcp/filesystem](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) | RAG SaaS |
+|---|:---:|:---:|:---:|:---:|
+| BM25 retrieval | ✅ | ❌ | ❌ | ✅ |
+| Token budgeting & cache positioning | ✅ | ❌ | ❌ | ❌ |
+| Typed memory (facts, decisions, patterns) | ✅ | ⚠️ graph only | ❌ | ⚠️ |
+| Per-team quality scoring | ✅ | ❌ | ❌ | ❌ |
+| Works offline (no keys) | ✅ | ✅ | ✅ | ❌ |
+| MIT licensed, single binary | ✅ | ✅ | ✅ | ❌ |
+| Setup time | ~60 sec | ~60 sec | ~60 sec | hours |
+| Cost | free | free | free | $$$ |
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|------|
+| `command not found: koshi-mcp` | Make sure your `dotnet tools` directory is on `PATH`. On macOS/Linux: `export PATH="$PATH:$HOME/.dotnet/tools"`. On Windows it's `%USERPROFILE%\.dotnet\tools`. |
+| `❌ No documents indexed` from `koshi_search` | Either set `KOSHI_INDEX_PATH` in your client config, or call `koshi_index_directory(path="...")` first. |
+| `❌ No supported, readable files found in: ...` | The path is empty, contains only excluded files (binaries, build output, hidden dirs), or no files match the pattern. Check with `koshi_list_indexed` and try a wider `pattern`. |
+| MCP client can't connect | Check that `koshi-mcp` runs on its own (`koshi-mcp` then send a JSON-RPC line). Logs appear on stderr; nothing should print on stdout until a request arrives. |
+| Memories disappear on restart | Set `KOSHI_MEMORY_FILE` to an absolute path. The file is created automatically. |
+| Vulnerability warning during install | The MCP package itself is clean. Some sibling demo projects in the source repo pull in older transitive packages — these never reach `koshi-mcp`. |
+
+Use `koshi_health` from any MCP client to quickly inspect runtime configuration.
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/jsharma1105/Koshi
+cd koshi
+
+# Build
+dotnet restore
+dotnet build src/Koshi.Mcp/Koshi.Mcp.csproj -c Release
+
+# Run unit tests
+dotnet test --no-build
+
+# Pack the NuGet tool
+dotnet pack src/Koshi.Mcp/Koshi.Mcp.csproj -c Release -o nupkg
+
+# Smoke test the MCP protocol end-to-end
+dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release
+
+# Install your local build over the published one
+dotnet tool install --global --add-source ./nupkg Koshi.Mcp
+```
+
+### Project layout
+
+```
+src/
+├── Koshi.Core/        # The retrieval/context/memory/quality engine
+├── Koshi.Mcp/         # ← This MCP server (publishes to NuGet)
+└── Koshi.*.Demo/      # Console demos for each engineering layer
+tests/
+├── Koshi.Core.Tests/      # 89 xUnit tests
+└── Koshi.Mcp.SmokeTest/   # End-to-end JSON-RPC smoke harness
+```
+
+### Releasing
+
+1. Bump `<Version>` in `src/Koshi.Mcp/Koshi.Mcp.csproj`.
+2. Update `CHANGELOG.md`.
+3. `dotnet pack src/Koshi.Mcp -c Release -o nupkg`.
+4. `dotnet nuget push nupkg/Koshi.Mcp.<version>.nupkg --source https://api.nuget.org/v3/index.json --api-key $NUGET_KEY`.
+5. Push the matching tag.
+
+---
+
+## License
+
+[MIT](LICENSE) © Koshi Contributors. See [CHANGELOG.md](../../CHANGELOG.md) for release notes.

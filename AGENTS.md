@@ -1,0 +1,144 @@
+# Koshi Sub-Agent Personas
+
+Five focused personas that wrap the **Koshi MCP server**'s 20 tools into role-specific agents you can invoke from MCP-compatible clients (GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Agency, …).
+
+The same five personas ship in two formats:
+
+| Format | Location | Used by |
+|--------|----------|---------|
+| Copilot CLI / Agency | [`.github/copilot/agents/*.agent.md`](./.github/copilot/agents/) | GitHub Copilot CLI, Microsoft Agency CLI |
+| Claude Code | [`.claude/agents/*.md`](./.claude/agents/) | Claude Code, Claude Desktop |
+
+## Personas
+
+| Persona | Pillar | Tools | When to use |
+|---------|--------|-------|-------------|
+| `koshi-librarian` | Retrieval | 5 + diagnostics | Index code/docs and search them. |
+| `koshi-memory-keeper` | Memory | 5 + diagnostics | Store / recall facts, decisions, patterns, preferences. |
+| `koshi-context-packer` | Context | 3 + read-only retrieval/recall | Plan token budgets and pack prompt windows for cache reuse. |
+| `koshi-quality-coach` | Quality | 5 + diagnostics | Score AI interactions per team, surface trends, recommend tuning. |
+| `koshi-orchestrator` | All | All 20 | Generalist that routes cross-pillar requests. |
+
+Each persona enforces single-responsibility boundaries — for example, `koshi-librarian` will refuse to call memory or team tools and will hand off to the right persona instead.
+
+---
+
+## Prerequisites
+
+1. Install the Koshi MCP server:
+   ```bash
+   dotnet tool install --global Koshi.Mcp
+   ```
+2. Configure it in your MCP client (see [`src/Koshi.Mcp/README.md`](./src/Koshi.Mcp/README.md) for Copilot CLI / Claude / Cursor / Windsurf snippets). The personas assume the server is registered under the name **`koshi`** — this matches the `mcp__koshi__*` tool-name prefix used in the Claude Code persona allow-lists.
+
+---
+
+## Installing the personas
+
+### GitHub Copilot CLI
+
+The `*.agent.md` files are picked up automatically when you launch Copilot CLI from this repo (or any parent of it). Verify with:
+
+```bash
+copilot agents list
+```
+
+You should see all five `koshi-*` agents. Invoke any of them by name:
+
+```bash
+copilot --agent koshi-librarian "Index this project and find where auth is handled."
+copilot --agent koshi-memory-keeper "Remember that we use Postgres 16 for the auth service."
+copilot --agent koshi-context-packer "Pack a 16K-token context for: how does the catalog sync work?"
+copilot --agent koshi-quality-coach "Score the last interaction for team 'platform-eng'."
+copilot --agent koshi-orchestrator "Find auth code and remember the architectural decision."
+```
+
+To make the personas discoverable from *any* workspace, copy them globally:
+
+```powershell
+# Windows
+Copy-Item .github\copilot\agents\*.agent.md "$env:USERPROFILE\.copilot\agents\" -Force
+```
+
+```bash
+# macOS / Linux
+mkdir -p ~/.copilot/agents
+cp .github/copilot/agents/*.agent.md ~/.copilot/agents/
+```
+
+### Claude Code
+
+The `.claude/agents/*.md` files are picked up automatically when Claude Code runs in this repo. Verify:
+
+```bash
+claude agents list
+```
+
+You should see all five `koshi-*` agents. Claude will route to them automatically based on the `description` field, or you can invoke explicitly:
+
+```
+@koshi-librarian Index this project and find where auth is handled.
+@koshi-memory-keeper Remember that we use Postgres 16 for the auth service.
+@koshi-context-packer Pack a 16K-token context for: how does the catalog sync work?
+@koshi-quality-coach Score the last interaction for team 'platform-eng'.
+@koshi-orchestrator Find auth code and remember the architectural decision.
+```
+
+To install globally:
+
+```bash
+mkdir -p ~/.claude/agents
+cp .claude/agents/koshi-*.md ~/.claude/agents/
+```
+
+### Other MCP clients (Cursor, Windsurf, Agency)
+
+The personas are plain Markdown system prompts. Copy the body of the relevant `.agent.md` file into the client's "custom mode" / "rules" / "instructions" panel. The frontmatter (description, tools allow-list) is informational for clients that don't enforce sub-agent isolation.
+
+---
+
+## How the personas relate to the 20 MCP tools
+
+```
+┌──────────────────────────── Koshi MCP (20 tools) ─────────────────────────────┐
+│                                                                                │
+│  Retrieval (5)        Memory (5)         Context (3)        Team/Qual (5)      │
+│  ──────────────      ─────────────      ─────────────      ──────────────      │
+│  index_directory ◄───┐                                                          │
+│  index           ◄───┤  remember  ◄───┐  compile  ◄───┐                         │
+│  search          ◄───┤  recall    ◄───┤  budget   ◄───┤                         │
+│  list_indexed    ◄───┤  stats     ◄───┤  tokens   ◄───┤                         │
+│  clear_index     ◄───┤  forget    ◄───┤              ◄┤                         │
+│                  ◄───┤  clear_mem ◄───┘              ◄┤  register_team  ◄───┐   │
+│                      │                               ◄│  score_turn     ◄───┤   │
+│                      │                                │  dashboard      ◄───┤   │
+│                      │                                │  analyze        ◄───┤   │
+│         + diagnostics: health, version                │  list_teams     ◄───┘   │
+│                      │                                │                         │
+│                      ▼                                ▼                         │
+│   koshi-librarian    koshi-memory-keeper   koshi-context-packer  koshi-quality-coach │
+│                                                                                 │
+│                ┌────────────── koshi-orchestrator ──────────────┐                │
+│                │             routes across all four              │                │
+│                └─────────────────────────────────────────────────┘                │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+`koshi-context-packer` has *read-only* access to retrieval and memory tools (it calls `koshi_search` / `koshi_recall` to gather material) but does not own them — it cannot index or store.
+
+---
+
+## Customizing
+
+The personas live in this repo so they version with the rest of Koshi. To tweak them:
+
+1. Edit the relevant `.agent.md` / `.md` file.
+2. Restart your MCP client (Copilot CLI / Claude Code re-read agents on session start).
+
+If you only need a slight tone shift (e.g., terser output), most clients accept a project-level override file that appends to the agent's system prompt — see your client's documentation.
+
+---
+
+## License
+
+[MIT](./LICENSE) © Koshi Contributors.
