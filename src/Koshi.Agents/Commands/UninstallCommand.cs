@@ -39,9 +39,10 @@ internal sealed class UninstallCommand : Command<UninstallCommand.Settings>
                 $"[cyan]{client.ToString().ToLowerInvariant()}[/] -> [grey]{Markup.Escape(dir)}[/]")
                 .LeftJustified());
 
-            foreach (var p in personas.Where(x => x.Client == client))
+            foreach (var target in personas
+                .Where(x => x.Client == client)
+                .Select(p => Path.Join(dir, p.FileName)))
             {
-                var target = Path.Join(dir, p.FileName);
                 if (!File.Exists(target))
                 {
                     missing++;
