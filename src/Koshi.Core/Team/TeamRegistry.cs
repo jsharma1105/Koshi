@@ -80,11 +80,6 @@ public sealed class TeamRegistry
         var scores = GetScores(teamId);
         var feedback = GetFeedback(teamId);
 
-        // Pull quality tracker data if available
-        var trackerEntries = qualityTracker?.GetAllEntries()
-            .Where(e => e.SessionId.Contains(teamId))
-            .ToList() ?? [];
-
         float avgScore = scores.Count > 0
             ? scores.Average(s => s.Composite) : 0;
         float avgRating = feedback.Count > 0

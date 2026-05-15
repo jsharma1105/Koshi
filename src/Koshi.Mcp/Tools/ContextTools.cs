@@ -122,7 +122,6 @@ public sealed class ContextTools
     {
         if (totalBudget < 1) totalBudget = 8192;
         var tokenCounter = _tokenCounter.Value;
-        var budget = ContextBudget.Default(totalBudget);
 
         int systemTokens = systemPrompt is not null ? tokenCounter.CountTokens(systemPrompt) : 0;
         int teamTokens = teamContext is not null ? tokenCounter.CountTokens(teamContext) : 0;

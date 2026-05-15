@@ -61,11 +61,11 @@ public sealed class QualityTracker
 
     /// <summary>Average budget utilization.</summary>
     public float AvgBudgetUtilization => _entries.Count > 0
-        ? (float)_entries.Average(e => e.BudgetUtilization) : 0;
+        ? _entries.Average(e => e.BudgetUtilization) : 0;
 
     /// <summary>Average cache ratio.</summary>
     public float AvgCacheRatio => _entries.Count > 0
-        ? (float)_entries.Average(e => e.CacheRatio) : 0;
+        ? _entries.Average(e => e.CacheRatio) : 0;
 
     /// <summary>Number of turns that used fallback.</summary>
     public int FallbackCount => _entries.Count(e => e.FallbackLevel != FallbackLevel.None);

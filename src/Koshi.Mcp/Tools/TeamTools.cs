@@ -93,15 +93,9 @@ public sealed class TeamTools
             };
         }
 
-        QualityScore score;
-        if (_registry.GetTeam(teamId) is not null)
-        {
-            score = _loop.ProcessTurn(teamId, metrics, feedback);
-        }
-        else
-        {
-            score = _scorer.Score(metrics, feedback);
-        }
+        QualityScore score = _registry.GetTeam(teamId) is not null
+            ? _loop.ProcessTurn(teamId, metrics, feedback)
+            : _scorer.Score(metrics, feedback);
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Quality Score: {score.Grade} ({score.Composite:F2}) ═══\n");
