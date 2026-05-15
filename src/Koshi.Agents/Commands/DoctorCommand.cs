@@ -75,15 +75,7 @@ internal sealed class DoctorCommand : Command<DoctorCommand.Settings>
             // 2b. Persona files on disk
             var dir = ClientResolver.AgentsDir(client, scope);
             var expected = personas.Where(p => p.Client == client).ToList();
-            var presentCount = 0;
-            foreach (var p in expected)
-            {
-                var path = Path.Combine(dir, p.FileName);
-                if (File.Exists(path))
-                {
-                    presentCount++;
-                }
-            }
+            var presentCount = expected.Count(p => File.Exists(Path.Join(dir, p.FileName)));
 
             if (presentCount == 0)
             {
@@ -125,13 +117,13 @@ internal sealed class DoctorCommand : Command<DoctorCommand.Settings>
         {
             try
             {
-                var candidate = Path.Combine(dir, executable);
+                var candidate = Path.Join(dir, executable);
                 if (File.Exists(candidate))
                 {
                     return candidate;
                 }
             }
-            catch
+            catch (ArgumentException)
             {
                 // ignore malformed PATH entries
             }

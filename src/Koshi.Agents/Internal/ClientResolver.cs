@@ -19,13 +19,13 @@ internal static class ClientResolver
         return (client, scope) switch
         {
             (PersonaClient.Claude, ScopeKind.User) =>
-                Path.Combine(HomeDir, ".claude", "agents"),
+                Path.Join(HomeDir, ".claude", "agents"),
             (PersonaClient.Claude, ScopeKind.Repo) =>
-                Path.Combine(repoRoot, ".claude", "agents"),
+                Path.Join(repoRoot, ".claude", "agents"),
             (PersonaClient.Copilot, ScopeKind.User) =>
-                Path.Combine(HomeDir, ".copilot", "agents"),
+                Path.Join(HomeDir, ".copilot", "agents"),
             (PersonaClient.Copilot, ScopeKind.Repo) =>
-                Path.Combine(repoRoot, ".github", "copilot", "agents"),
+                Path.Join(repoRoot, ".github", "copilot", "agents"),
             _ => throw new ArgumentOutOfRangeException(nameof(client)),
         };
     }
@@ -36,17 +36,17 @@ internal static class ClientResolver
     public static string McpConfigFile(PersonaClient client) => client switch
     {
         PersonaClient.Claude when OperatingSystem.IsWindows() =>
-            Path.Combine(
+            Path.Join(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "Claude", "claude_desktop_config.json"),
         PersonaClient.Claude when OperatingSystem.IsMacOS() =>
-            Path.Combine(HomeDir, "Library", "Application Support", "Claude",
+            Path.Join(HomeDir, "Library", "Application Support", "Claude",
                 "claude_desktop_config.json"),
         PersonaClient.Claude =>
-            Path.Combine(HomeDir, ".config", "Claude", "claude_desktop_config.json"),
+            Path.Join(HomeDir, ".config", "Claude", "claude_desktop_config.json"),
 
         PersonaClient.Copilot =>
-            Path.Combine(HomeDir, ".copilot", "mcp_config.json"),
+            Path.Join(HomeDir, ".copilot", "mcp_config.json"),
 
         _ => throw new ArgumentOutOfRangeException(nameof(client)),
     };

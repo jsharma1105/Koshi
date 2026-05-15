@@ -66,8 +66,10 @@ public sealed class CachePrefixOptimizer
         decimal inputPricePerMToken = 2.50m, // GPT-4o-mini pricing
         float cacheDiscount = 0.5f)         // 50% discount for cached tokens
     {
-        decimal dailyCostWithoutCache = queriesPerDay * prefixTokens / 1_000_000m * inputPricePerMToken;
-        decimal dailyCostWithCache = queriesPerDay * prefixTokens / 1_000_000m * inputPricePerMToken *
+        // Cast one operand to decimal first so the int*int multiplication can't overflow
+        // before the divide. (queriesPerDay * prefixTokens easily exceeds int.MaxValue.)
+        decimal dailyCostWithoutCache = (decimal)queriesPerDay * prefixTokens / 1_000_000m * inputPricePerMToken;
+        decimal dailyCostWithCache = (decimal)queriesPerDay * prefixTokens / 1_000_000m * inputPricePerMToken *
             (1 - (decimal)(CacheHitRate * cacheDiscount));
         decimal dailySavings = dailyCostWithoutCache - dailyCostWithCache;
 
