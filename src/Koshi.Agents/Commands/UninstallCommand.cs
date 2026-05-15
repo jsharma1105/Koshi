@@ -41,7 +41,7 @@ internal sealed class UninstallCommand : Command<UninstallCommand.Settings>
 
             foreach (var p in personas.Where(x => x.Client == client))
             {
-                var target = Path.Combine(dir, p.FileName);
+                var target = Path.Join(dir, p.FileName);
                 if (!File.Exists(target))
                 {
                     missing++;

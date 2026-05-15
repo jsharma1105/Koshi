@@ -84,7 +84,6 @@ public sealed class BudgetManager
     {
         // Find roles with surplus and roles that could use more
         int totalSurplus = 0;
-        var deficitRoles = new List<(ContextRole Role, int Deficit)>();
 
         foreach (var (role, allocated) in _allocated)
         {

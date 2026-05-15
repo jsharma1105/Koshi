@@ -101,19 +101,13 @@ internal static class SafeFileEnumerator
 
     private static bool IsExcludedDirectory(string normalizedPath)
     {
-        foreach (var seg in ExcludedDirectorySegments)
-        {
-            if (normalizedPath.Contains(seg, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
+        if (ExcludedDirectorySegments.Any(seg => normalizedPath.Contains(seg, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
         // Exclude any path segment that starts with '.' (hidden dir convention)
         // except for a small allow-list of conventional, safe directories.
-        foreach (var part in normalizedPath.Split('/'))
-        {
-            if (part.Length > 1 && part[0] == '.' && part is not ".github" and not ".vscode-test")
-                return true;
-        }
-        return false;
+        return normalizedPath.Split('/').Any(part =>
+            part.Length > 1 && part[0] == '.' && part is not ".github" and not ".vscode-test");
     }
 
     private static bool IsExcludedFile(string fileName, string ext)
@@ -126,13 +120,8 @@ internal static class SafeFileEnumerator
                 return true;
         }
 
-        foreach (var blockedExt in ExcludedFileExtensions)
-        {
-            if (string.Equals(ext, blockedExt, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
+        return ExcludedFileExtensions.Any(blockedExt =>
+            string.Equals(ext, blockedExt, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsSupportedExtension(string ext) =>

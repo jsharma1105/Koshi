@@ -59,7 +59,7 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
 
             foreach (var p in personas.Where(x => x.Client == client))
             {
-                var target = Path.Combine(dir, p.FileName);
+                var target = Path.Join(dir, p.FileName);
                 var exists = File.Exists(target);
 
                 if (settings.DryRun)
