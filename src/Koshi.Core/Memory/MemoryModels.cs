@@ -54,18 +54,6 @@ public sealed record MemoryScope(
 }
 
 /// <summary>
-/// Result from memory recall with computed relevance.
-/// </summary>
-public sealed record MemoryRecallResult(
-    MemoryRecord Memory,
-    float EmbeddingSimilarity,
-    float DecayedRelevance,
-    float FinalScore)
-{
-    public int EstimatedTokens { get; init; }
-}
-
-/// <summary>
 /// Result from fact extraction with quality metadata.
 /// </summary>
 public sealed record ExtractionResult

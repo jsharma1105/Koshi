@@ -236,10 +236,10 @@ into reliable, observable, cost-effective AI systems.
 │  Eval Harness    │ Fallback Strategy│ Quality Tracker  │
 ├────────────────────────────────────────────────────────┤
 │  RETRIEVAL LAYER                                       │
-│  Vector Search │ Keyword (BM25) │ Bluebird MCP │ Memory│
+│  Vector Search │ Keyword (BM25) │ External MCPs│ Memory│
 ├────────────────────────────────────────────────────────┤
 │  MODEL LAYER (swappable)                               │
-│  GPT-4o │ Claude Sonnet │ Local Ollama                 │
+│  GPT-4o │ Claude Sonnet │ Local model backend          │
 ├────────────────────────────────────────────────────────┤
 │  OBSERVABILITY LAYER                                   │
 │  Token Tracking │ Quality Scoring │ Latency Tracing    │

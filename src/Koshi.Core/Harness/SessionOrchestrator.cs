@@ -9,29 +9,26 @@ using Koshi.Core.Tokenization;
 using Microsoft.Extensions.AI;
 
 /// <summary>
-/// The central orchestrator that ties retrieval, memory, context compilation,
+/// The central orchestrator that ties retrieval, context compilation,
 /// and LLM execution into a single pipeline. This is the "Harness" —
 /// the scaffolding that makes an AI system work reliably.
-/// 
+///
 /// Pipeline:
-///   Query → Retrieve → Recall memories → Compile context → LLM call → Extract facts → Track metrics
-/// 
+///   Query → Retrieve → Compile context → LLM call → Track metrics
+///
 /// Design principles:
 /// - Coordinator only — does not implement logic, delegates to components
 /// - Does not own conversation history or session storage
-/// - Configurable pipeline steps (skip memory, disable extraction, etc.)
+/// - Configurable pipeline steps (skip retrieval, etc.)
 /// - Fallback cascade on failures
 /// - Full observability via tracer and quality tracker
 /// </summary>
 public sealed class SessionOrchestrator
 {
     private readonly IRetriever _retriever;
-    private readonly MemoryRetriever? _memoryRetriever;
     private readonly ContextCompiler _contextCompiler;
     private readonly CachePrefixOptimizer _cacheOptimizer;
     private readonly IChatClient _chatClient;
-    private readonly IFactExtractor? _factExtractor;
-    private readonly IMemoryStore? _memoryStore;
     private readonly TokenCounter _tokenCounter;
     private readonly QualityTracker _qualityTracker;
     private readonly FallbackStrategy _fallbackStrategy;
@@ -44,10 +41,7 @@ public sealed class SessionOrchestrator
         IChatClient chatClient,
         TokenCounter tokenCounter,
         QualityTracker qualityTracker,
-        IHarnessTracer? tracer = null,
-        MemoryRetriever? memoryRetriever = null,
-        IFactExtractor? factExtractor = null,
-        IMemoryStore? memoryStore = null)
+        IHarnessTracer? tracer = null)
     {
         _retriever = retriever;
         _contextCompiler = contextCompiler;
@@ -56,9 +50,6 @@ public sealed class SessionOrchestrator
         _tokenCounter = tokenCounter;
         _qualityTracker = qualityTracker;
         _tracer = tracer ?? NullTracer.Instance;
-        _memoryRetriever = memoryRetriever;
-        _factExtractor = factExtractor;
-        _memoryStore = memoryStore;
         _fallbackStrategy = new FallbackStrategy(_tracer);
     }
 
@@ -104,25 +95,13 @@ public sealed class SessionOrchestrator
             await RetrieveAsync(ctx, config, ct);
         }
 
-        // ── Step 2: Recall relevant memories ──
-        if (config.EnableMemory && _memoryRetriever is not null)
-        {
-            await RecallMemoriesAsync(ctx, config, ct);
-        }
-
-        // ── Step 3: Compile context window ──
+        // ── Step 2: Compile context window ──
         CompileContext(ctx, config);
 
-        // ── Step 4: Call LLM ──
+        // ── Step 3: Call LLM ──
         await CallLlmAsync(ctx, config, ct);
 
-        // ── Step 5: Post-processing (fact extraction) ──
-        if (config.EnableFactExtraction && _factExtractor is not null)
-        {
-            await ExtractFactsAsync(ctx, config, ct);
-        }
-
-        // ── Step 6: Update session state and track metrics ──
+        // ── Step 4: Update session state and track metrics ──
         FinalizeAndTrack(ctx, config);
 
         return BuildResult(ctx);
@@ -142,22 +121,6 @@ public sealed class SessionOrchestrator
         sw.Stop();
         ctx.RetrievalLatency = sw.Elapsed;
         activity?.SetTag("chunks.count", ctx.RetrievedChunks.Count);
-    }
-
-    private async Task RecallMemoriesAsync(
-        SessionTurnContext ctx, HarnessPipelineConfig config, CancellationToken ct)
-    {
-        using var activity = _tracer.StartActivity("RecallMemories");
-        var sw = Stopwatch.StartNew();
-
-        ctx.RecalledMemories = await _memoryRetriever!.SearchAsync(
-            ctx.Query,
-            new RetrievalOptions(TopK: 5, MaxTokenBudget: 1024),
-            ct);
-
-        sw.Stop();
-        ctx.MemoryLatency = sw.Elapsed;
-        activity?.SetTag("memories.count", ctx.RecalledMemories.Count);
     }
 
     private void CompileContext(SessionTurnContext ctx, HarnessPipelineConfig config)
@@ -223,41 +186,6 @@ public sealed class SessionOrchestrator
         sw.Stop();
         ctx.LlmLatency = sw.Elapsed;
         activity?.SetTag("response.length", ctx.LlmResponse?.Length ?? 0);
-    }
-
-    private async Task ExtractFactsAsync(
-        SessionTurnContext ctx, HarnessPipelineConfig config, CancellationToken ct)
-    {
-        if (_factExtractor is null || _memoryStore is null) return;
-
-        // Skip extraction during degraded modes to prevent memory pollution
-        if (config.SkipFactExtractionOnFallback && ctx.FallbackLevel != FallbackLevel.None)
-            return;
-
-        using var activity = _tracer.StartActivity("ExtractFacts");
-        var sw = Stopwatch.StartNew();
-
-        // Determine what to extract from
-        string extractionInput = config.ExtractFromUserOnly
-            ? ctx.Query
-            : $"User: {ctx.Query}\n\nAssistant: {ctx.LlmResponse}";
-
-        ctx.FactExtraction = await _factExtractor.ExtractAsync(
-            extractionInput, ctx.Session.MemoryScope, $"session:{ctx.Session.SessionId}", ct);
-
-        // Store extracted facts
-        if (ctx.FactExtraction.Accepted > 0)
-        {
-            foreach (var memory in ctx.FactExtraction.Extracted)
-            {
-                await _memoryStore.StoreAsync(memory, ct);
-            }
-        }
-
-        sw.Stop();
-        ctx.FactExtractionLatency = sw.Elapsed;
-        activity?.SetTag("facts.accepted", ctx.FactExtraction.Accepted);
-        activity?.SetTag("facts.rejected", ctx.FactExtraction.Rejected);
     }
 
     private void FinalizeAndTrack(SessionTurnContext ctx, HarnessPipelineConfig config)
