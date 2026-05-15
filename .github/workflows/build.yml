@@ -40,7 +40,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os }}
           path: '**/TestResults/*.trx'
@@ -62,7 +62,7 @@ jobs:
       - name: Pack Koshi.Agents
         run: dotnet pack src/Koshi.Agents/Koshi.Agents.csproj -c Release -o nupkg --include-symbols
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nupkg
           path: nupkg/
