@@ -5,6 +5,62 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-15
+
+### Added
+- **MCP smoke test** (`tests/Koshi.Mcp.SmokeTest`) is now part of `Koshi.slnx`
+  and runs as a dedicated `smoke (MCP protocol)` job in CI on every PR, and
+  also runs as a release gate before any NuGet publish — catches stdio /
+  JSON-RPC regressions that unit tests don't.
+
+### Changed
+- **Dependency upgrade:** `ModelContextProtocol` 1.0.0 → 1.3.0.
+- **Dependency upgrade:** `Microsoft.Extensions.AI.Abstractions` → 10.6.0.
+- **Dependency upgrade:** `Microsoft.SourceLink.GitHub` → 10.0.300.
+- **Dependency upgrade:** `GitHubActionsTestLogger` → 3.0.4.
+- **Workflow refresh:** `actions/checkout@v6`, `actions/setup-dotnet@v5`,
+  `github/codeql-action@v4`, `actions/upload-artifact@v7`.
+- **README refresh:** new hero section explaining the four pillars and a
+  60-second install path; repository-layout section updated to match the
+  current `Core / Mcp / Agents` shape (the previous list of demo projects
+  was removed in earlier cleanup but the README hadn't caught up).
+- **`CONTRIBUTING.md` / `src/Koshi.Mcp/README.md`:** project-layout sections
+  no longer reference deleted demo / CLI / eval / tuner directories. The
+  Mcp README's "Releasing" section now documents the tag-triggered release
+  workflow instead of manual `dotnet nuget push`.
+- **CI hardening:** `actions/upload-artifact` steps marked
+  `continue-on-error: true` so transient artifact-service outages (HTML
+  responses instead of JSON when the backend is degraded) no longer fail
+  builds whose tests passed.
+
+### Fixed
+- **`Koshi.Core/Context/CachePrefixOptimizer.EstimateSavings`** — possible
+  integer overflow when `queriesPerDay × prefixTokens` exceeded `int.MaxValue`
+  before the cast to `decimal` (e.g. 1M queries × 10K tokens = 10^10).
+  First operand is now widened to `decimal` before the multiply.
+- **`Koshi.Agents`** — `Path.Combine` → `Path.Join` everywhere; `Path.Join`
+  concatenates with separators and never silently drops earlier arguments
+  if a later one looks rooted.
+- **Dead-code / warning cleanups across `Koshi.Core` and `Koshi.Mcp`** —
+  unused `deficitRoles`, `trackerEntries`, `budget` locals removed;
+  redundant `(float)` casts removed; redundant `if`/`else` collapsed to
+  a ternary in `TeamTools`; `foreach`-immediately-mapped loops rewritten
+  with `.Select(...)` in `UninstallCommand` and `DoctorCommand` per CodeQL
+  `cs/linq/missed-select`; implicit-filter `foreach`es in
+  `SafeFileEnumerator` rewritten with `.Where(...)` per `cs/linq/missed-where`.
+
+### Security
+- **Transitive pin:** `Microsoft.Bcl.Memory` held at 10.0.8, above the
+  vulnerable 9.0.4 (GHSA-73j8-2gch-69rq). Not exploitable in Koshi's
+  default configuration; pinned out of an abundance of caution.
+
+### Removed
+- `Koshi.Cli`, `Koshi.Eval`, `Koshi.Tuner`, and the per-pillar demo
+  projects (`Koshi.Retrieval.Demo`, `Koshi.Memory.Demo`,
+  `Koshi.Context.Demo`, `Koshi.Harness.Demo`, `Koshi.Team.Demo`) were
+  deleted in earlier cleanup — this release ensures every doc reflects
+  that.
+
 ## [0.2.0] - 2026-05-14
 
 ### Added

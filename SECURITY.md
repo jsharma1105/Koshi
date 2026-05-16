@@ -58,8 +58,9 @@ please report it.
 
 | Version | Supported |
 |---------|-----------|
-| 0.2.x   | ✅ Yes — current |
-| 0.1.x   | ❌ No  — pre-release; upgrade to 0.2.x |
+| 0.3.x   | ✅ Yes — current |
+| 0.2.x   | ❌ No  — superseded; upgrade to 0.3.x |
+| 0.1.x   | ❌ No  — pre-release; upgrade to 0.3.x |
 
 ## Hall of fame
 

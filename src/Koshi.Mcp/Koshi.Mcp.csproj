@@ -14,7 +14,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>Koshi.Mcp</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Title>Koshi MCP Server</Title>
     <Authors>Koshi Contributors</Authors>
     <Company>Koshi</Company>

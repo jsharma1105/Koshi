@@ -1,6 +1,6 @@
 {
   "name": "koshi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Koshi MCP — retrieval, context engineering, persistent memory, and quality scoring for AI agents. 100% offline.",
   "author": {
     "name": "Koshi Contributors"
