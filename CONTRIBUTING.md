@@ -30,14 +30,10 @@ dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release
 src/
 ├── Koshi.Core/        ← Engine: retrieval, memory, context, quality
 ├── Koshi.Mcp/         ← MCP server (NuGet: Koshi.Mcp, command: koshi-mcp)
-├── Koshi.Agents/      ← Persona installer (NuGet: Koshi.Agents, command: koshi-agents)
-├── Koshi.Cli/         ← Phase-1 retrieval demo
-├── Koshi.Eval/        ← Evaluation harness
-├── Koshi.Tuner/       ← Configuration tuner
-└── Koshi.*.Demo/      ← Walk-through demos for each engineering layer
+└── Koshi.Agents/      ← Persona installer (NuGet: Koshi.Agents, command: koshi-agents)
 tests/
-├── Koshi.Core.Tests/      ← xUnit unit tests
-└── Koshi.Mcp.SmokeTest/   ← End-to-end JSON-RPC harness
+├── Koshi.Core.Tests/      ← xUnit unit tests (89 tests today)
+└── Koshi.Mcp.SmokeTest/   ← End-to-end JSON-RPC smoke harness
 ```
 
 ## How to contribute

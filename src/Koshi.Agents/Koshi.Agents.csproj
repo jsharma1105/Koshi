@@ -14,7 +14,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>Koshi.Agents</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Title>Koshi Agents — sub-agent persona installer</Title>
     <Authors>Koshi Contributors</Authors>
     <Company>Koshi</Company>

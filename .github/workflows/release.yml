@@ -49,6 +49,11 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release
 
+      - name: MCP smoke test
+        # Exits 0 iff the freshly-built koshi-mcp responds to initialize + tools/list + tool calls.
+        # Final guard against stdio/JSON-RPC regressions before publishing.
+        run: dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build
+
       - name: Pack Koshi.Mcp
         run: |
           dotnet pack src/Koshi.Mcp/Koshi.Mcp.csproj \
