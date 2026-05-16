@@ -470,7 +470,7 @@ dotnet tool install --global --add-source ./nupkg Koshi.Mcp
 src/
 ├── Koshi.Core/        # The retrieval/context/memory/quality engine
 ├── Koshi.Mcp/         # ← This MCP server (publishes to NuGet)
-└── Koshi.*.Demo/      # Console demos for each engineering layer
+└── Koshi.Agents/      # Sub-agent persona installer (publishes to NuGet)
 tests/
 ├── Koshi.Core.Tests/      # 89 xUnit tests
 └── Koshi.Mcp.SmokeTest/   # End-to-end JSON-RPC smoke harness
@@ -478,11 +478,24 @@ tests/
 
 ### Releasing
 
-1. Bump `<Version>` in `src/Koshi.Mcp/Koshi.Mcp.csproj`.
-2. Update `CHANGELOG.md`.
-3. `dotnet pack src/Koshi.Mcp -c Release -o nupkg`.
-4. `dotnet nuget push nupkg/Koshi.Mcp.<version>.nupkg --source https://api.nuget.org/v3/index.json --api-key $NUGET_KEY`.
-5. Push the matching tag.
+Releases are automated by [`.github/workflows/release.yml`](../../.github/workflows/release.yml). To cut a new version:
+
+1. Bump `<Version>` in both `src/Koshi.Mcp/Koshi.Mcp.csproj` and `src/Koshi.Agents/Koshi.Agents.csproj`.
+2. Update `version` in `plugin.json` and `.claude-plugin/plugin.json` to match.
+3. Add a new section at the top of [`CHANGELOG.md`](../../CHANGELOG.md).
+4. Open a PR titled `release vX.Y.Z`. Merge once CI is green.
+5. Tag `main` with `vX.Y.Z` and push the tag:
+   ```bash
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+6. The release workflow builds, tests, packs both packages, pushes to NuGet, and creates a GitHub release with auto-generated notes.
+
+To pack locally for testing without publishing:
+
+```bash
+dotnet pack src/Koshi.Mcp -c Release -o nupkg -p:Version=X.Y.Z
+dotnet tool install --global --add-source ./nupkg Koshi.Mcp --version X.Y.Z
+```
 
 ---
 

@@ -48,6 +48,24 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  smoke:
+    name: smoke (MCP protocol)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build Koshi.slnx --configuration Release
+      - name: Run MCP smoke test
+        # Exits 0 iff the server responds to initialize + tools/list + ≥1 tools/call.
+        # Catches stdio/JSON-RPC regressions that unit tests don't.
+        run: dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build
+
   pack-smoke:
     name: pack (smoke)
     runs-on: ubuntu-latest
