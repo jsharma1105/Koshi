@@ -27,6 +27,23 @@ Plus 2 diagnostics tools (`koshi_version`, `koshi_health`). **20 total.**
 
 ## 60-second install
 
+Pick the path that matches your stack:
+
+### Python — `pip install koshi`
+
+```bash
+pip install koshi
+python -c "from koshi import Client
+with Client() as k:
+    print(k.version())"
+```
+
+No `.NET install` required. First call auto-downloads a native AOT binary
+(~15 MB) into your user cache, verified by SHA-256 against hashes baked into
+the wheel. See [`python/README.md`](python/README.md) for the full API.
+
+### .NET — `dotnet tool install`
+
 ```bash
 # 1. Install the MCP server
 dotnet tool install --global Koshi.Mcp
@@ -37,6 +54,25 @@ dotnet tool install --global Koshi.Mcp
 # 3. (Optional) Install the 5 sub-agent personas
 dotnet tool install --global Koshi.Agents
 koshi-agents install --client both
+```
+
+### No runtime — download the AOT binary
+
+Every [GitHub release](https://github.com/jsharma1105/Koshi/releases) ships
+self-contained single-file `koshi-mcp` binaries for `linux-x64`, `linux-arm64`,
+`osx-x64`, `osx-arm64`, `win-x64`, and `win-arm64`, plus matching `.sha256`
+sidecars and a `manifest.json`. Run them on a clean machine without any .NET
+runtime installed.
+
+```bash
+# Linux x64 example — adapt RID for your platform
+curl -L -o koshi-mcp \
+  https://github.com/jsharma1105/Koshi/releases/latest/download/koshi-mcp-linux-x64
+curl -L -o koshi-mcp.sha256 \
+  https://github.com/jsharma1105/Koshi/releases/latest/download/koshi-mcp-linux-x64.sha256
+sha256sum -c <(awk '{print $1"  koshi-mcp"}' koshi-mcp.sha256)
+chmod +x koshi-mcp
+./koshi-mcp  # speaks MCP over stdio
 ```
 
 ## Why you'd use this instead of writing it yourself
@@ -54,7 +90,12 @@ koshi-agents install --client both
 
 - 📦 [`Koshi.Mcp`](src/Koshi.Mcp/) — A **Model Context Protocol** server you install
   with `dotnet tool install -g Koshi.Mcp`. Plugs into Claude Code, Copilot CLI,
-  Cursor, Windsurf, and every other MCP-compatible client.
+  Cursor, Windsurf, and every other MCP-compatible client. Also distributed as
+  Native AOT single-file binaries on every GitHub release (no .NET runtime
+  required).
+- 🐍 [`koshi`](python/) — **Python client** on PyPI. `pip install koshi` and
+  talk to the same engine over JSON-RPC from Python; the binary downloads
+  itself on first use.
 - 🛠️ [`Koshi.Core`](src/Koshi.Core/) — The underlying library you can embed in
   your own .NET agents/services.
 - 🤖 [`Koshi.Agents`](src/Koshi.Agents/) — Five Koshi-aware sub-agent personas
@@ -68,11 +109,15 @@ koshi-agents install --client both
 ```
 src/
 ├── Koshi.Core/                     The engine: retrieval, context, memory, telemetry
-├── Koshi.Mcp/                      MCP server (NuGet: Koshi.Mcp)
+├── Koshi.Mcp/                      MCP server (NuGet: Koshi.Mcp; AOT binaries on GH releases)
 └── Koshi.Agents/                   Sub-agent personas installer (NuGet: Koshi.Agents)
+python/
+└── src/koshi/                      Python client (PyPI: koshi)
 tests/
 ├── Koshi.Core.Tests/               89 xUnit unit tests
 └── Koshi.Mcp.SmokeTest/            End-to-end JSON-RPC smoke harness
+scripts/
+└── inject-manifest.py              Release-time hash injector for the Python wheel
 ```
 
 ## Build everything

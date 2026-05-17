@@ -1,0 +1,108 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "koshi"
+version = "0.4.0"
+description = "Python client for the Koshi MCP server — retrieval, memory, context, and quality tools for any LLM workflow. Auto-downloads a native AOT binary; no .NET install required."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Koshi Contributors" },
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "llm",
+    "rag",
+    "retrieval",
+    "bm25",
+    "context-engineering",
+    "memory",
+    "agent",
+    "claude",
+    "copilot",
+    "cursor",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Intentionally zero runtime dependencies — every byte is stdlib.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "build>=1.2",
+    "twine>=5.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jsharma1105/Koshi"
+Documentation = "https://github.com/jsharma1105/Koshi#readme"
+Repository = "https://github.com/jsharma1105/Koshi"
+Issues = "https://github.com/jsharma1105/Koshi/issues"
+Changelog = "https://github.com/jsharma1105/Koshi/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/koshi"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/koshi/**/*.py",
+    "src/koshi/py.typed",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",  # handled by formatter
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/koshi"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_reexport = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "slow: tests that spawn a real koshi-mcp subprocess (deselect with -m 'not slow')",
+]
+timeout = 60
