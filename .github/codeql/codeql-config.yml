@@ -1,0 +1,29 @@
+name: "Koshi CodeQL config"
+
+# CodeQL configuration for the Koshi repo.
+#
+# We scan the C# source tree under the standard "security-and-quality" suite,
+# but we EXCLUDE build output and tool-generated source from the analysis:
+#
+#   - obj/ and bin/ contain compiler intermediates. In particular, the
+#     System.Text.Json source generator emits *.g.cs files under
+#     obj/<config>/<tfm>/generated/.../KoshiJsonContext.*.g.cs whose
+#     generated boxing-style casts trip cs/useless-cast-to-self over and
+#     over. These are not maintainer-authored code and there is nothing for
+#     a human to fix about them, so they would only generate noise on every
+#     PR. Excluding the directory keeps real findings visible.
+#
+#   - Native AOT publish output likewise emits a lot of generator output
+#     that has the same property.
+#
+# If you need to scan generated code (e.g. for a security audit of the
+# source generator itself) temporarily flip paths-ignore off for that run.
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - "**/obj/**"
+  - "**/bin/**"
+  - "**/publish/**"
+  - "**/*.g.cs"
