@@ -7,9 +7,9 @@
 //
 // Usage:
 //   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build
-//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --dll <path>
-//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --exe <path>
-//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --exe <path> --expected-version 0.4.0
+//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --dll path
+//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --exe path
+//   dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- --exe path --expected-version 0.4.0
 //
 // Background: the MCP SDK does some reflection at startup and on every
 // tools/call. We want the AOT release pipeline to discover any IL2026 /
@@ -44,7 +44,9 @@ for (int i = 0; i < args.Length; i++)
 
 if (dllPath is null && exePath is null)
 {
-    dllPath = Path.GetFullPath(Path.Combine(
+    // Path.Join (not Path.Combine) — Join always concatenates and never
+    // silently drops earlier arguments if a later segment looks rooted.
+    dllPath = Path.GetFullPath(Path.Join(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..",
         "src", "Koshi.Mcp", "bin", "Release", "net10.0", "koshi-mcp.dll"));
 }
@@ -130,14 +132,14 @@ string? preSeededMemoryFile = null;
 string? preSeededMemoryDir = null;
 try
 {
-    preSeededMemoryDir = Path.Combine(Path.GetTempPath(), $"koshi-smoke-{Guid.NewGuid():N}");
+    preSeededMemoryDir = Path.Join(Path.GetTempPath(), $"koshi-smoke-{Guid.NewGuid():N}");
     Directory.CreateDirectory(preSeededMemoryDir);
-    preSeededMemoryFile = Path.Combine(preSeededMemoryDir, "v030-memories.json");
+    preSeededMemoryFile = Path.Join(preSeededMemoryDir, "v030-memories.json");
     File.WriteAllText(preSeededMemoryFile, V030MemoryFixtureJson);
     psi.Environment["KOSHI_MEMORY_FILE"] = preSeededMemoryFile;
     Console.Error.WriteLine($"[setup] Pre-seeded v0.3.0 memory fixture at: {preSeededMemoryFile}");
 }
-catch (Exception ex)
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 {
     Console.Error.WriteLine($"[setup] WARN: failed to seed memory fixture: {ex.Message}");
     preSeededMemoryFile = null;
@@ -156,7 +158,7 @@ _ = Task.Run(async () =>
 });
 
 var responses = new Dictionary<int, JsonElement>();
-var responseSignal = new SemaphoreSlim(0);
+using var responseSignal = new SemaphoreSlim(0);
 
 _ = Task.Run(async () =>
 {
@@ -194,7 +196,7 @@ async Task<JsonElement?> RpcAsync(string method, object? @params = null, int tim
     await proc.StandardInput.FlushAsync();
 
     var deadline = Environment.TickCount + timeoutMs;
-    while (!responses.ContainsKey(id))
+    while (!responses.TryGetValue(id, out var cached))
     {
         int remaining = deadline - Environment.TickCount;
         if (remaining <= 0)
@@ -202,6 +204,10 @@ async Task<JsonElement?> RpcAsync(string method, object? @params = null, int tim
             return null;
         }
         await responseSignal.WaitAsync(Math.Max(1, remaining));
+        if (responses.TryGetValue(id, out cached))
+        {
+            return cached;
+        }
     }
     return responses[id];
 }
@@ -272,9 +278,12 @@ else
         lr.TryGetProperty("tools", out var tools) &&
         tools.ValueKind == JsonValueKind.Array)
     {
-        foreach (var t in tools.EnumerateArray())
+        var named = tools.EnumerateArray()
+            .Where(t => t.ValueKind == JsonValueKind.Object && t.TryGetProperty("name", out _))
+            .Select(t => t.GetProperty("name").GetString() ?? string.Empty);
+        foreach (var name in named)
         {
-            if (t.TryGetProperty("name", out var n)) toolNames.Add(n.GetString() ?? "");
+            toolNames.Add(name);
         }
     }
     string[] expected = [
@@ -284,9 +293,9 @@ else
         "koshi_register_team", "koshi_score_turn", "koshi_team_dashboard", "koshi_analyze_feedback", "koshi_list_teams",
         "koshi_version", "koshi_health",
     ];
-    foreach (var name in expected)
+    foreach (var name in expected.Where(n => !toolNames.Contains(n)))
     {
-        if (!toolNames.Contains(name)) failures.Add($"tools/list: missing tool '{name}'");
+        failures.Add($"tools/list: missing tool '{name}'");
     }
     Console.Error.WriteLine($"[info] tools/list reported {toolNames.Count} tools");
 }
@@ -374,7 +383,7 @@ await ExpectSuccessAsync("koshi_index", "koshi_index", new
 {
     documents = """[{"content":"alpha bravo charlie","source":"a.md","type":"documentation"},{"content":"delta echo foxtrot","source":"b.md","type":"documentation"}]"""
 });
-var indexPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src"));
+var indexPath = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src"));
 await ExpectSuccessAsync("koshi_index_directory", "koshi_index_directory", new { path = indexPath, pattern = "*.cs" });
 await ExpectSuccessAsync("koshi_search", "koshi_search", new { query = "alpha bravo", topK = 2 });
 await ExpectSuccessAsync("koshi_list_indexed", "koshi_list_indexed", new { });
@@ -433,7 +442,10 @@ if (!proc.HasExited) proc.Kill();
 if (preSeededMemoryDir is not null)
 {
     try { Directory.Delete(preSeededMemoryDir, recursive: true); }
-    catch (Exception ex) { Console.Error.WriteLine($"[cleanup] WARN: could not remove {preSeededMemoryDir}: {ex.Message}"); }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+    {
+        Console.Error.WriteLine($"[cleanup] WARN: could not remove {preSeededMemoryDir}: {ex.Message}");
+    }
 }
 
 Console.Error.WriteLine();
