@@ -10,8 +10,12 @@ open a public GitHub issue**. Instead, report it privately:
    maintainers privately and starts a coordinated disclosure thread.
 2. Include in your report:
    - A clear description of the issue.
-   - Steps to reproduce, including the affected version (e.g. `koshi-mcp 0.2.0`),
-     OS, .NET runtime version, and MCP client.
+   - Steps to reproduce, including the affected version (e.g. `koshi-mcp 0.4.0`,
+     `koshi (Python) 0.4.0`), OS / CPU architecture, .NET runtime version (if
+     applicable), Python version (if applicable), and MCP client.
+   - For Python-client reports: whether the binary came from auto-download,
+     `KOSHI_BIN`, or `PATH`; and the exact SHA-256 your `koshi` package
+     expected vs. the SHA-256 of the binary that ran.
    - The potential impact (information disclosure, code execution, etc.).
    - Any suggested mitigation.
 
@@ -26,7 +30,13 @@ In scope:
 - `Koshi.Mcp` MCP server (NuGet package, `koshi-mcp` binary).
 - `Koshi.Agents` persona installer (NuGet package, `koshi-agents` binary).
 - `Koshi.Core` library.
+- **Native AOT release binaries** (`koshi-mcp-<rid>`) published as GitHub
+  release assets, including their `.sha256` sidecars and the `manifest.json`.
+- **`koshi` Python package** on PyPI — the resolver, downloader, SHA-256
+  verifier, and JSON-RPC client (`python/src/koshi/`).
 - Build / release workflows in `.github/workflows/`.
+- `scripts/inject-manifest.py` — release-time hash injector for the Python
+  wheel.
 
 Out of scope:
 
@@ -40,9 +50,21 @@ Out of scope:
 
 Koshi is designed to fail safely:
 
-- **No network calls.** The default install never makes outbound HTTP/HTTPS
-  requests.
-- **No telemetry.** No analytics, no phone-home.
+- **No runtime network calls.** Once started, `koshi-mcp` (NuGet, AOT binary,
+  or spawned by the Python client) makes zero outbound HTTP/HTTPS requests for
+  the full lifetime of the server process.
+- **First-use download is the only network code path.** The `koshi` Python
+  package may download a matching `koshi-mcp` binary from a pinned
+  GitHub-release URL on first use *if* `KOSHI_BIN` is unset and no binary is
+  on `PATH`. The download is over HTTPS, the SHA-256 is baked into the wheel
+  at release time (not fetched), and the file is atomically replaced under a
+  per-cache-dir lock. Set `KOSHI_BIN` to an offline binary to eliminate even
+  this path.
+- **Wheel ↔ binary integrity is cryptographic.** `scripts/inject-manifest.py`
+  embeds the SHA-256 of every per-RID binary into the wheel before publish.
+  A tampered binary on the GitHub release alone is insufficient to compromise
+  a `pip install koshi` user — the wheel itself has to be tampered with too.
+- **No telemetry.** No analytics, no phone-home, in any distribution channel.
 - **Stdio transport only.** `koshi-mcp` does not open listening ports.
 - **Logs to stderr only.** Stdout is reserved for MCP JSON-RPC.
 - **Safe file enumeration.** `koshi_index_directory` skips hidden directories,
@@ -50,6 +72,10 @@ Koshi is designed to fail safely:
   above a configurable size cap. See `SafeFileEnumerator.cs`.
 - **No code execution paths.** Indexed content is parsed as text. No
   deserialization of untrusted code, no shell-out, no `eval`.
+- **AOT-clean engine.** `Koshi.Mcp` is `<IsAotCompatible>true</IsAotCompatible>`
+  with an exhaustive `WarningsAsErrors` list (IL2026–IL3056) and a source-
+  generated JSON context. No reflection-driven JSON paths are reachable at
+  runtime, which closes off most JSON-payload deserialization gadgets.
 
 If you find a deviation from any of these guarantees, that is a security bug —
 please report it.
@@ -58,9 +84,10 @@ please report it.
 
 | Version | Supported |
 |---------|-----------|
-| 0.3.x   | ✅ Yes — current |
-| 0.2.x   | ❌ No  — superseded; upgrade to 0.3.x |
-| 0.1.x   | ❌ No  — pre-release; upgrade to 0.3.x |
+| 0.4.x   | ✅ Yes — current |
+| 0.3.x   | ✅ Yes — previous stable, fix-only |
+| 0.2.x   | ❌ No  — superseded; upgrade to 0.4.x |
+| 0.1.x   | ❌ No  — pre-release; upgrade to 0.4.x |
 
 ## Hall of fame
 

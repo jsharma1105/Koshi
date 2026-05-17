@@ -4,10 +4,13 @@
 
 [![NuGet](https://img.shields.io/nuget/v/Koshi.Mcp.svg?label=Koshi.Mcp&color=004880)](https://www.nuget.org/packages/Koshi.Mcp/)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Koshi.Mcp.svg?color=004880)](https://www.nuget.org/packages/Koshi.Mcp/)
+[![PyPI](https://img.shields.io/pypi/v/koshi.svg?label=koshi%20(PyPI)&color=3776AB)](https://pypi.org/project/koshi/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/koshi.svg?color=3776AB)](https://pypi.org/project/koshi/)
 [![Build](https://github.com/jsharma1105/Koshi/actions/workflows/build.yml/badge.svg)](https://github.com/jsharma1105/Koshi/actions/workflows/build.yml)
 [![CodeQL](https://github.com/jsharma1105/Koshi/actions/workflows/codeql.yml/badge.svg)](https://github.com/jsharma1105/Koshi/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dot.net)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.0-blue.svg)](https://modelcontextprotocol.io)
 
 ## What Koshi is, in three sentences
@@ -78,11 +81,12 @@ chmod +x koshi-mcp
 ## Why you'd use this instead of writing it yourself
 
 - **It's done.** 20 tools, 89 unit tests, .NET 10, MIT.
-- **It's local.** No API keys, no cloud, no telemetry phoning home.
+- **It's local.** No API keys, no cloud, no telemetry phoning home. Same wire format and on-disk format whether you reach it via `pip`, `dotnet tool`, or the raw AOT binary.
+- **It's friction-free.** `pip install koshi` works from a fresh Python 3.10 environment — no .NET install — and auto-fetches a native AOT binary verified against SHA-256 hashes baked into the wheel.
 - **It composes.** The sub-agent personas know which tools each persona is allowed to call — so your agents don't accidentally clobber memory while searching.
 - **It's measurable.** The telemetry pillar isn't an afterthought — it's a first-class set of tools.
 
-[**→ Get started in AGENTS.md**](AGENTS.md)
+[**→ Get started in AGENTS.md**](AGENTS.md) · [**→ Python quickstart**](docs/python-quickstart.md)
 
 ---
 
@@ -127,6 +131,17 @@ dotnet restore
 dotnet build -c Release
 dotnet test  --no-build
 ```
+
+For Python-package development, see [`CONTRIBUTING.md`](CONTRIBUTING.md#python-package-development).
+
+## Documentation
+
+- [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 20 tools indexed.
+- [**MCP server reference**](src/Koshi.Mcp/README.md) — every tool, every argument, every client snippet.
+- [**Sub-agent personas**](AGENTS.md) — librarian, memory-keeper, context-packer, quality-coach, orchestrator.
+- [**Security policy**](SECURITY.md) — what's in scope, what's not, how to report.
+- [**Changelog**](CHANGELOG.md) — every release, every change.
+- [**Engineering notes**](docs/context-memory-harness-engineering.md) — the design of memory + retrieval + context + telemetry.
 
 ## License
 
