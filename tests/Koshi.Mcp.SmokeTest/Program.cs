@@ -76,6 +76,73 @@ psi.UseShellExecute = false;
 psi.StandardInputEncoding = Encoding.UTF8;
 psi.StandardOutputEncoding = Encoding.UTF8;
 
+// ─── Pre-seed a v0.3.0-shaped memory file ────────────────────────────────
+// Validates that the v0.4.0 AOT source-generated JsonSerializerContext can
+// still read memory files written by v0.3.0's manual JsonSerializerOptions
+// pipeline. Includes all 14 MemoryRecord fields with PascalCase property
+// names and string-encoded enums (the v0.3.0 wire shape). If the source
+// generator silently changes the format, koshi_recall below will not find
+// the seeded subject and the smoke fails — guarding against silent
+// on-disk-format drift.
+//
+// The file is also writable: subsequent koshi_remember calls in Phase 4
+// will overwrite it with the v0.4.0 format. That's the intended round-trip.
+const string V030MemoryFixtureJson = """
+{
+  "SchemaVersion": 1,
+  "SavedAt": "2026-04-01T10:00:00+00:00",
+  "Memories": [
+    {
+      "Id": "mem-v030-000001",
+      "Type": "Decision",
+      "Content": "OLS offer IDs use the format OLS-{SegmentCode}-{000001}. Reserved by Koshi v0.3.0 smoke test as a backwards-compat fixture.",
+      "Subject": "ols-offer-id-format",
+      "Scope": {
+        "UserId": "*",
+        "WorkspaceId": "default",
+        "ThreadId": null
+      },
+      "Source": "v030-fixture",
+      "Confidence": 0.95,
+      "CreatedAt": "2026-04-01T10:00:00+00:00",
+      "LastAccessedAt": "2026-04-01T10:00:00+00:00",
+      "AccessCount": 0,
+      "Tier": "Hot"
+    },
+    {
+      "Id": "mem-v030-000002",
+      "Type": "Pattern",
+      "Content": "DOME API controllers delegate every data access call to a stored procedure via ISQLHelperRepository.",
+      "Subject": "dome-data-access",
+      "Scope": { "UserId": "*", "WorkspaceId": "default" },
+      "Source": "v030-fixture",
+      "Confidence": 0.9,
+      "CreatedAt": "2026-04-01T10:00:00+00:00",
+      "LastAccessedAt": "2026-04-01T10:00:00+00:00",
+      "AccessCount": 3,
+      "Tier": "Warm"
+    }
+  ]
+}
+""";
+
+string? preSeededMemoryFile = null;
+string? preSeededMemoryDir = null;
+try
+{
+    preSeededMemoryDir = Path.Combine(Path.GetTempPath(), $"koshi-smoke-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(preSeededMemoryDir);
+    preSeededMemoryFile = Path.Combine(preSeededMemoryDir, "v030-memories.json");
+    File.WriteAllText(preSeededMemoryFile, V030MemoryFixtureJson);
+    psi.Environment["KOSHI_MEMORY_FILE"] = preSeededMemoryFile;
+    Console.Error.WriteLine($"[setup] Pre-seeded v0.3.0 memory fixture at: {preSeededMemoryFile}");
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"[setup] WARN: failed to seed memory fixture: {ex.Message}");
+    preSeededMemoryFile = null;
+}
+
 Console.Error.WriteLine($"=== Launching: {psi.FileName} {psi.Arguments} ===");
 var proc = Process.Start(psi)!;
 
@@ -241,6 +308,66 @@ else
     }
 }
 
+// ─── Phase 3.5: v0.3.0 memory file compatibility ────────────────────────
+// Asserts that the file written at startup by a v0.3.0-shaped pipeline
+// deserializes cleanly under the v0.4.0 source-generated context. If
+// either of the two seeded subjects fails to come back, the on-disk
+// memory format has drifted and any v0.3.0 user upgrading to v0.4.0
+// would silently lose their stored memories.
+if (preSeededMemoryFile is not null)
+{
+    var compatResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new { query = "OLS offer id format", type = "All", topK = 5 }
+    });
+    if (compatResp is null)
+    {
+        failures.Add("memory-compat: recall TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(compatResp.Value);
+        if (text is null)
+        {
+            failures.Add("memory-compat: recall returned no text");
+        }
+        else if (!text.Contains("OLS-{SegmentCode}", StringComparison.Ordinal)
+              || !text.Contains("ols-offer-id-format", StringComparison.Ordinal))
+        {
+            failures.Add($"memory-compat: pre-seeded v0.3.0 Decision memory NOT loaded. Recall response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] memory-compat: v0.3.0 Decision memory loaded under v0.4.0 source-gen");
+        }
+    }
+
+    // Also exercise a second memory with a different Tier (Warm) — covers the
+    // enum source-gen converter on a less-common value.
+    var compatResp2 = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new { query = "DOME stored procedure ISQLHelperRepository", type = "Pattern", topK = 5 }
+    });
+    if (compatResp2 is null)
+    {
+        failures.Add("memory-compat: second recall TIMEOUT");
+    }
+    else
+    {
+        var text2 = ExtractFirstText(compatResp2.Value);
+        if (text2 is null || !text2.Contains("dome-data-access", StringComparison.Ordinal))
+        {
+            failures.Add($"memory-compat: pre-seeded v0.3.0 Pattern memory NOT loaded (Warm tier). Recall response: {(text2 ?? "(no text)")[..Math.Min(240, (text2 ?? "").Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] memory-compat: v0.3.0 Pattern/Warm memory loaded under v0.4.0 source-gen");
+        }
+    }
+}
+
 // ─── Phase 4: each of the 20 tools ──────────────────────────────────────
 // Retrieval (5)
 await ExpectSuccessAsync("koshi_index", "koshi_index", new
@@ -301,6 +428,13 @@ await ExpectToolErrorAsync("bad: index invalid JSON", "koshi_index", new { docum
 proc.StandardInput.Close();
 proc.WaitForExit(5000);
 if (!proc.HasExited) proc.Kill();
+
+// Best-effort cleanup of the pre-seeded memory fixture directory.
+if (preSeededMemoryDir is not null)
+{
+    try { Directory.Delete(preSeededMemoryDir, recursive: true); }
+    catch (Exception ex) { Console.Error.WriteLine($"[cleanup] WARN: could not remove {preSeededMemoryDir}: {ex.Message}"); }
+}
 
 Console.Error.WriteLine();
 Console.Error.WriteLine($"=== Smoke summary: {(failures.Count == 0 ? "PASS" : "FAIL")} ({failures.Count} failure(s), {responses.Count} responses received) ===");
