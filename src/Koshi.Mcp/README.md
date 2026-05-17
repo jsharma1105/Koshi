@@ -64,11 +64,25 @@ Koshi is a learning + production tool. Use it to:
 
 ## Quick Start (60 seconds)
 
-### Prerequisites
+Pick one of three install paths:
 
-- **[.NET 10 SDK or runtime](https://dot.net/download)** (Windows, macOS, Linux)
+### Option A — Python users (`pip install koshi`)
 
-### Install as a global tool
+```bash
+pip install koshi
+python -c "from koshi import Client
+with Client() as k:
+    print(k.version())"
+```
+
+No `.NET install` required. The first call auto-downloads a native AOT
+binary (~15 MB) into your user cache, verified by SHA-256 against hashes
+baked into the wheel at release time. See [the PyPI page](https://pypi.org/project/koshi/)
+for the full Python API.
+
+### Option B — .NET tool (`dotnet tool install`)
+
+**Prerequisites**: [.NET 10 SDK or runtime](https://dot.net/download) (Windows, macOS, Linux).
 
 ```bash
 dotnet tool install --global Koshi.Mcp
@@ -79,6 +93,13 @@ This installs the `koshi-mcp` command globally. Verify with:
 ```bash
 koshi-mcp --version    # should match the installed package version
 ```
+
+### Option C — No-runtime download (Native AOT single-file binary)
+
+Every GitHub release ships self-contained `koshi-mcp` binaries (no .NET
+runtime required) for `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`,
+`win-x64`, and `win-arm64`, each with a `.sha256` sidecar. See the
+[releases page](https://github.com/jsharma1105/Koshi/releases).
 
 ### Add to your MCP client
 

@@ -14,7 +14,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>Koshi.Mcp</PackageId>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Title>Koshi MCP Server</Title>
     <Authors>Koshi Contributors</Authors>
     <Company>Koshi</Company>
@@ -37,6 +37,16 @@
     <DebugType>portable</DebugType>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' OR '$(TF_BUILD)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Native AOT readiness. IsAotCompatible turns on the trim / AOT / single-file
+         analyzers without forcing every build to publish AOT, so `dotnet build`,
+         `dotnet test`, and `dotnet pack` (for the global tool flavor) still work
+         normally. Actual AOT artifacts are produced by the release.yml matrix via
+         `dotnet publish -c Release -r <rid> -p:PublishAot=true`. IL warnings are
+         hard errors so any future regression breaks the build, not the release. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2046;IL2050;IL2055;IL2057;IL2058;IL2059;IL2060;IL2062;IL2063;IL2064;IL2065;IL2066;IL2067;IL2068;IL2069;IL2070;IL2071;IL2072;IL2073;IL2074;IL2075;IL2076;IL2077;IL2078;IL2079;IL2080;IL2081;IL2082;IL2083;IL2084;IL2085;IL2086;IL2087;IL2088;IL2089;IL2090;IL2091;IL2092;IL2093;IL2094;IL2095;IL2096;IL2097;IL2098;IL2099;IL2100;IL2101;IL2102;IL2103;IL2104;IL2105;IL2106;IL2107;IL2108;IL2109;IL2110;IL2111;IL2112;IL2113;IL2114;IL2115;IL2116;IL2117;IL2118;IL2119;IL2120;IL2121;IL2122;IL3000;IL3001;IL3002;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

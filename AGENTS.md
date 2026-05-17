@@ -25,11 +25,39 @@ Each persona enforces single-responsibility boundaries — for example, `koshi-l
 
 ## Prerequisites
 
+Pick one — every flavor talks to the same MCP server.
+
+### Python (`pip install koshi`)
+
+```bash
+pip install koshi
+```
+
+That's it. The first `Client()` call auto-downloads a matching `koshi-mcp`
+native AOT binary into your user cache, verifying it against the SHA-256
+baked into the wheel. No .NET install required.
+
+```python
+from koshi import Client
+with Client() as koshi:
+    print(koshi.version())
+```
+
+The personas below are *informational* in Python — they describe how to scope
+the 20 tools into role-specific prompts when you wire Koshi into Claude Code /
+Copilot CLI from a Python-only host. The agent-installer below is .NET-only.
+
+### .NET tool (`dotnet tool install`)
+
 1. Install the Koshi MCP server:
    ```bash
    dotnet tool install --global Koshi.Mcp
    ```
 2. Configure it in your MCP client (see [`src/Koshi.Mcp/README.md`](./src/Koshi.Mcp/README.md) for Copilot CLI / Claude / Cursor / Windsurf snippets). The personas assume the server is registered under the name **`koshi`** — this matches the `mcp__koshi__*` tool-name prefix used in the Claude Code persona allow-lists.
+
+### Native AOT binary (`koshi-mcp-<rid>`)
+
+Download the matching binary from any [GitHub release](https://github.com/jsharma1105/Koshi/releases) for your `linux-x64`/`linux-arm64`/`osx-x64`/`osx-arm64`/`win-x64`/`win-arm64` platform. Verify against the `.sha256` sidecar. Drop it on `PATH` (or point your client's `command` field at it). No .NET runtime needed.
 
 ---
 

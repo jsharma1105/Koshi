@@ -42,8 +42,7 @@ public sealed class RetrievalTools
         List<DocInput>? docs;
         try
         {
-            docs = JsonSerializer.Deserialize<List<DocInput>>(documents,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            docs = JsonSerializer.Deserialize(documents, KoshiJsonContext.Default.ListDocInput);
         }
         catch (JsonException ex)
         {
@@ -298,10 +297,4 @@ public sealed class RetrievalTools
         return string.IsNullOrWhiteSpace(env) ? null : Path.GetFullPath(env);
     }
 
-    private sealed record DocInput
-    {
-        public string Content { get; init; } = "";
-        public string? Source { get; init; }
-        public string? Type { get; init; }
-    }
 }

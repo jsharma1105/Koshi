@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Koshi.Core.Memory;
 
 namespace Koshi.Mcp.Internal;
@@ -7,16 +6,12 @@ namespace Koshi.Mcp.Internal;
 /// <summary>
 /// Optional JSON file persistence for memories.
 /// When enabled (KOSHI_MEMORY_FILE is set), writes are atomic (temp + replace).
+/// All (de)serialization goes through the AOT-safe source-generated
+/// <see cref="KoshiJsonContext"/>.
 /// </summary>
 internal sealed class MemoryPersistence
 {
     private const int SchemaVersion = 1;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
 
     public string? Path { get; }
     public bool IsEnabled => Path is not null;
@@ -35,7 +30,7 @@ internal sealed class MemoryPersistence
             var json = File.ReadAllText(Path);
             if (string.IsNullOrWhiteSpace(json)) return [];
 
-            var envelope = JsonSerializer.Deserialize<PersistenceEnvelope>(json, JsonOptions);
+            var envelope = JsonSerializer.Deserialize(json, KoshiJsonContext.Default.PersistenceEnvelope);
             return envelope?.Memories ?? [];
         }
         catch (Exception ex)
@@ -61,7 +56,7 @@ internal sealed class MemoryPersistence
                 SavedAt = DateTimeOffset.UtcNow,
                 Memories = [.. memories],
             };
-            var json = JsonSerializer.Serialize(envelope, JsonOptions);
+            var json = JsonSerializer.Serialize(envelope, KoshiJsonContext.Default.PersistenceEnvelope);
 
             var tempPath = Path + ".tmp";
             File.WriteAllText(tempPath, json);
@@ -71,12 +66,5 @@ internal sealed class MemoryPersistence
         {
             Console.Error.WriteLine($"[koshi] Failed to save memory file '{Path}': {ex.Message}");
         }
-    }
-
-    private sealed class PersistenceEnvelope
-    {
-        public int SchemaVersion { get; set; }
-        public DateTimeOffset SavedAt { get; set; }
-        public List<MemoryRecord> Memories { get; set; } = [];
     }
 }

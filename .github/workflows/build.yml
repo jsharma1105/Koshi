@@ -88,3 +88,50 @@ jobs:
           name: nupkg
           path: nupkg/
           retention-days: 7
+
+  aot-smoke:
+    name: aot-smoke (linux-x64)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install AOT prerequisites (clang, zlib)
+        # .NET Native AOT on Linux requires a C toolchain + zlib headers.
+        # ubuntu-latest images already have clang, but zlib1g-dev is not
+        # always preinstalled — better safe than sorry.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+      - name: Publish Koshi.Mcp as Native AOT (linux-x64)
+        # AOT publish stamps the assembly with the version we pass here; the
+        # smoke test re-reads it via koshi_version. If the version doesn't
+        # round-trip cleanly, the smoke fails and so does this PR gate.
+        run: |
+          dotnet publish src/Koshi.Mcp/Koshi.Mcp.csproj \
+            -c Release -r linux-x64 \
+            -p:PublishAot=true \
+            -p:Version=0.4.0-aot-smoke \
+            -o aot
+      - name: Build smoke test harness
+        run: dotnet build tests/Koshi.Mcp.SmokeTest -c Release
+      - name: Run full smoke against AOT binary
+        # Exercises ALL 20 tools + 3 bad-arg paths + version-stamp assertion
+        # against the AOT binary directly (no `dotnet` host). Catches any
+        # SDK runtime reflection that build-time IL warnings don't surface.
+        run: |
+          chmod +x ./aot/koshi-mcp
+          dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- \
+            --exe ./aot/koshi-mcp \
+            --expected-version 0.4.0-aot-smoke
+      - name: Report AOT binary size
+        if: always()
+        run: |
+          if [ -f ./aot/koshi-mcp ]; then
+            ls -lh ./aot/koshi-mcp
+            echo "size_bytes=$(stat -c '%s' ./aot/koshi-mcp)" >> $GITHUB_STEP_SUMMARY
+          fi
