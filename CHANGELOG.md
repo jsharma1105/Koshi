@@ -5,6 +5,56 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+- **Python client (`pip install koshi`)** — new official Python package on PyPI.
+  Zero runtime dependencies (stdlib only), wraps all 20 MCP tools as Pythonic
+  methods, auto-downloads the matching native AOT binary on first use, and
+  verifies it against SHA-256 hashes baked into the wheel at release time. No
+  .NET install required for Python users.
+- **Native AOT release binaries** — single-file, self-contained `koshi-mcp`
+  executables for `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`,
+  `win-x64`, and `win-arm64`, attached to every GitHub release with
+  `manifest.json` and `.sha256` sidecars. Run on a clean machine without any
+  .NET runtime installed.
+- **AOT-clean engine** — `src/Koshi.Mcp` is now flagged `IsAotCompatible=true`
+  with `InvariantGlobalization`, an exhaustive `WarningsAsErrors` list for
+  every trim/AOT analyzer code (IL2026–IL3056), a source-generated JSON
+  context (`Koshi.Mcp.Internal.KoshiJsonContext`), and explicit
+  `WithTools<T>()` registration in place of the reflection-based
+  `WithToolsFromAssembly()`. `dotnet publish -p:PublishAot=true` succeeds with
+  zero warnings.
+- **`aot-smoke (linux-x64)` PR gate** — `build.yml` now AOT-publishes
+  `koshi-mcp`, runs the expanded smoke harness against the native binary, and
+  reports the binary size to the workflow summary. Required check in branch
+  protection.
+- **Expanded smoke harness** — `Koshi.Mcp.SmokeTest` gained an `--exe` mode for
+  AOT binaries, all 20 tools are now exercised on every run, 3 bad-argument
+  paths verify error responses, and the `koshi_version` output is asserted to
+  match the expected version stamp.
+- **4-stage release pipeline** — `release.yml` is now a DAG of `nuget` →
+  `aot` (matrix of 6 RIDs, fail-fast disabled) → `release` (single writer,
+  hard-gated on all 6 RIDs present) → `pypi` (gated on the
+  `PUBLISH_PYPI` repo variable and the `pypi-release` environment).
+- **`scripts/inject-manifest.py`** — release-time helper that injects the
+  binary SHA-256 hashes into the Python wheel's `_manifest.py` before the
+  wheel is built, binding wheel and binaries by content.
+
+### Changed
+- **`Koshi.Mcp.Internal.PersistenceEnvelope`** and
+  **`Koshi.Mcp.Internal.DocInput`** are now top-level internal types (were
+  private nested) so the source-generated JSON context can reference them.
+  No public API change.
+- **Versions** — `Koshi.Mcp` and `Koshi.Agents` both bumped to `0.4.0` in
+  lockstep. Same engine, same MCP tool surface — only the distribution
+  channels are new.
+
+### No behavior changes
+- All 20 MCP tools accept the same arguments and return the same shapes as
+  v0.3.0. The 89 unit tests pass unchanged. v0.3.0 persisted memory files
+  load cleanly under v0.4.0.
+
 ## [0.3.0] - 2026-05-15
 
 ### Added

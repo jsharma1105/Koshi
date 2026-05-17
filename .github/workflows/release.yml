@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 0.3.0). Leave blank to use the tag.'
+        description: 'Version to release (e.g. 0.4.0). Leave blank to use the tag.'
         required: false
 
 permissions:
@@ -15,10 +15,16 @@ permissions:
   packages: write   # for GitHub Packages mirror (optional)
 
 jobs:
-  release:
-    name: release ${{ github.ref_name }}
+  # ─── 1. NuGet pack + push ────────────────────────────────────────────────
+  # Builds, tests, and publishes the two NuGet packages. Also exports the
+  # resolved version as a job output so every downstream job stamps the
+  # same value into the AOT binary, the manifest, and the Python wheel.
+  nuget:
+    name: nuget pack & push
     runs-on: ubuntu-latest
     environment: nuget-release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -49,9 +55,9 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release
 
-      - name: MCP smoke test
-        # Exits 0 iff the freshly-built koshi-mcp responds to initialize + tools/list + tool calls.
-        # Final guard against stdio/JSON-RPC regressions before publishing.
+      - name: MCP smoke test (DLL)
+        # First guard: confirms the JIT-compiled DLL still speaks MCP cleanly
+        # before we burn 6 AOT matrix runs to repeat the experiment.
         run: dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build
 
       - name: Pack Koshi.Mcp
@@ -83,19 +89,258 @@ jobs:
               --skip-duplicate
           done
 
-      - name: Upload packages as artifact
+      - name: Upload nupkg artifact
         uses: actions/upload-artifact@v7
         with:
-          name: nupkg-${{ steps.version.outputs.version }}
+          name: nupkg
           path: nupkg/
+          retention-days: 30
 
-      - name: Create GitHub release
+  # ─── 2. Native AOT matrix (6 RIDs) ───────────────────────────────────────
+  # Each row publishes Koshi.Mcp as a self-contained, single-file AOT binary
+  # for its RID, smoke-tests the binary against the full MCP surface, and
+  # uploads it as a workflow artifact. Hashes are computed by the
+  # consolidate-release job (single writer) so they cannot diverge per RID.
+  aot:
+    name: aot ${{ matrix.rid }}
+    needs: nuget
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false   # Don't kill other RIDs if one fails; consolidate-release will fail the release.
+      matrix:
+        include:
+          - rid: linux-x64
+            runner: ubuntu-latest
+            ext: ''
+          - rid: linux-arm64
+            runner: ubuntu-22.04-arm
+            ext: ''
+          - rid: osx-x64
+            runner: macos-13
+            ext: ''
+          - rid: osx-arm64
+            runner: macos-14
+            ext: ''
+          - rid: win-x64
+            runner: windows-latest
+            ext: '.exe'
+          - rid: win-arm64
+            runner: windows-11-arm
+            ext: '.exe'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install AOT prerequisites (Linux only)
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: Publish Koshi.Mcp as Native AOT
+        shell: bash
+        run: |
+          dotnet publish src/Koshi.Mcp/Koshi.Mcp.csproj \
+            -c Release -r ${{ matrix.rid }} \
+            -p:PublishAot=true \
+            -p:Version=${{ needs.nuget.outputs.version }} \
+            -o aot
+
+      - name: Stage artifact with RID-stamped name
+        shell: bash
+        run: |
+          mkdir -p staged
+          cp "aot/koshi-mcp${{ matrix.ext }}" "staged/koshi-mcp-${{ matrix.rid }}${{ matrix.ext }}"
+          ls -lh staged/
+
+      - name: Build smoke harness
+        run: dotnet build tests/Koshi.Mcp.SmokeTest -c Release
+
+      - name: Smoke test AOT binary (all 20 tools + bad-arg paths + version assertion)
+        shell: bash
+        run: |
+          BIN="staged/koshi-mcp-${{ matrix.rid }}${{ matrix.ext }}"
+          chmod +x "$BIN" || true
+          dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build -- \
+            --exe "$BIN" \
+            --expected-version ${{ needs.nuget.outputs.version }}
+
+      - name: Report AOT binary size
+        if: always()
+        shell: bash
+        run: |
+          BIN="staged/koshi-mcp-${{ matrix.rid }}${{ matrix.ext }}"
+          if [ -f "$BIN" ]; then
+            ls -lh "$BIN"
+            SIZE=$(wc -c < "$BIN")
+            echo "## AOT ${{ matrix.rid }} size: $SIZE bytes ($((SIZE / 1024 / 1024)) MB)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload AOT binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: aot-${{ matrix.rid }}
+          path: staged/koshi-mcp-${{ matrix.rid }}${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 30
+
+  # ─── 3. Consolidate release (single writer to GH release) ────────────────
+  # Downloads every AOT artifact, hard-fails if any RID is missing,
+  # computes hashes, generates manifest.json, and creates the GH release
+  # with NuGet + AOT binaries + sha256 sidecars + manifest in one shot.
+  release:
+    name: github release
+    needs: [nuget, aot]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.nuget.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Verify all 6 AOT RIDs present (hard gate)
+        # Per the "all 6 platforms or no release" failure policy: if any
+        # RID's matrix job failed, abort the release here.
+        run: |
+          set -e
+          missing=()
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            case "$rid" in win-*) ext=.exe ;; *) ext= ;; esac
+            f="artifacts/aot-$rid/koshi-mcp-$rid$ext"
+            if [ ! -f "$f" ]; then missing+=("$f"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing AOT binaries (no partial release):"
+            printf '::error::  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "All 6 RIDs present."
+
+      - name: Compute hashes, generate manifest.json, stage release/
+        shell: bash
+        run: |
+          set -e
+          VERSION="${{ needs.nuget.outputs.version }}"
+          mkdir -p release
+
+          # Copy NuGet packages.
+          cp artifacts/nupkg/*.nupkg release/
+          cp artifacts/nupkg/*.snupkg release/
+
+          # Build a single manifest.json that pairs each RID with its
+          # filename and sha256. The Python publish job embeds these
+          # hashes into the wheel so the binary download is verified
+          # against a hash baked into the package the user installed.
+          {
+            echo '{'
+            echo "  \"version\": \"$VERSION\","
+            echo '  "release_url_template": "https://github.com/jsharma1105/Koshi/releases/download/v{version}/{filename}",'
+            echo '  "binaries": {'
+            first=1
+            for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+              case "$rid" in win-*) ext=.exe ;; *) ext= ;; esac
+              src="artifacts/aot-$rid/koshi-mcp-$rid$ext"
+              dst="release/koshi-mcp-$rid$ext"
+              cp "$src" "$dst"
+              HASH=$(sha256sum "$dst" | awk '{print $1}')
+              echo "$HASH  koshi-mcp-$rid$ext" > "release/koshi-mcp-$rid$ext.sha256"
+              if [ $first -eq 1 ]; then first=0; else echo ','; fi
+              printf '    "%s": { "filename": "koshi-mcp-%s%s", "sha256": "%s" }' "$rid" "$rid" "$ext" "$HASH"
+            done
+            echo
+            echo '  }'
+            echo '}'
+          } > release/manifest.json
+
+          echo "── release/ contents ──"
+          ls -la release/
+          echo "── manifest.json ──"
+          cat release/manifest.json
+
+      - name: Upload consolidated release-assets artifact
+        # Stored so the pypi job can embed manifest.json hashes into the wheel
+        # without re-downloading every individual aot-* artifact.
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: release/
+          retention-days: 90
+
+      - name: Create / update GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          name: Koshi v${{ steps.version.outputs.version }}
+          name: Koshi v${{ needs.nuget.outputs.version }}
           generate_release_notes: true
-          files: |
-            nupkg/*.nupkg
-            nupkg/*.snupkg
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── 4. Publish Python wheel to PyPI ─────────────────────────────────────
+  # Gated on the PUBLISH_PYPI repo variable so the first few v0.4.0-rc tags
+  # can dry-run the AOT pipeline without burning the PyPI release. Also
+  # gated on the pypi-release environment so the PYPI_API_TOKEN secret +
+  # any reviewer approval gates apply.
+  pypi:
+    name: publish python
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ vars.PUBLISH_PYPI == 'true' }}
+    environment: pypi-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download release-assets (manifest.json)
+        uses: actions/download-artifact@v7
+        with:
+          name: release-assets
+          path: artifacts
+
+      - name: Inject manifest hashes into Python wheel
+        # Binds the wheel to the AOT binaries by content hash. Without this
+        # step, a single supply-chain compromise on the GH release would be
+        # enough to swap a binary for an attacker's; with it, an attacker
+        # needs to compromise both PyPI and GH releases atomically.
+        run: |
+          python scripts/inject-manifest.py \
+            --version "${{ needs.release.outputs.version }}" \
+            --manifest artifacts/manifest.json \
+            --out python/src/koshi/_manifest.py
+          echo "── injected manifest ──"
+          cat python/src/koshi/_manifest.py
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build wheel + sdist
+        run: python -m build python/
+
+      - name: twine check
+        run: python -m twine check python/dist/*
+
+      - name: twine upload
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload python/dist/*
