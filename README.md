@@ -4,6 +4,8 @@
 
 [![NuGet](https://img.shields.io/nuget/v/Koshi.Mcp.svg?label=Koshi.Mcp&color=004880)](https://www.nuget.org/packages/Koshi.Mcp/)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Koshi.Mcp.svg?color=004880)](https://www.nuget.org/packages/Koshi.Mcp/)
+[![NuGet](https://img.shields.io/nuget/v/Koshi.Agents.svg?label=Koshi.Agents&color=512BD4)](https://www.nuget.org/packages/Koshi.Agents/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/Koshi.Agents.svg?color=512BD4)](https://www.nuget.org/packages/Koshi.Agents/)
 [![PyPI](https://img.shields.io/pypi/v/koshi.svg?label=koshi%20(PyPI)&color=3776AB)](https://pypi.org/project/koshi/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/koshi.svg?color=3776AB)](https://pypi.org/project/koshi/)
 [![Build](https://github.com/jsharma1105/Koshi/actions/workflows/build.yml/badge.svg)](https://github.com/jsharma1105/Koshi/actions/workflows/build.yml)
