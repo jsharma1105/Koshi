@@ -57,7 +57,7 @@ Copilot CLI from a Python-only host. The agent-installer below is .NET-only.
 
 ### Native AOT binary (`koshi-mcp-<rid>`)
 
-Download the matching binary from any [GitHub release](https://github.com/jsharma1105/Koshi/releases) for your `linux-x64`/`linux-arm64`/`osx-x64`/`osx-arm64`/`win-x64`/`win-arm64` platform. Verify against the `.sha256` sidecar. Drop it on `PATH` (or point your client's `command` field at it). No .NET runtime needed.
+Download the matching binary from any [GitHub release](https://github.com/jsharma1105/Koshi/releases) for your `linux-x64`/`linux-arm64`/`osx-arm64`/`win-x64`/`win-arm64` platform. Verify against the `.sha256` sidecar. Drop it on `PATH` (or point your client's `command` field at it). No .NET runtime needed. (Intel Mac users: install via `dotnet tool install --global Koshi.Mcp` instead.)
 
 ---
 

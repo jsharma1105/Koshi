@@ -127,10 +127,10 @@ Releases are triggered by pushing a `v*.*.*` tag. The release workflow runs as a
 4-job DAG:
 
 1. **`nuget`** — packs `Koshi.Mcp` + `Koshi.Agents` and publishes to NuGet.
-2. **`aot`** — matrix of 6 RIDs (`linux-x64`, `linux-arm64`, `osx-x64`,
-   `osx-arm64`, `win-x64`, `win-arm64`). Each produces a self-contained
+2. **`aot`** — matrix of 5 RIDs (`linux-x64`, `linux-arm64`, `osx-arm64`,
+   `win-x64`, `win-arm64`). Each produces a self-contained
    single-file `koshi-mcp` and its `.sha256` sidecar. `fail-fast: false`.
-3. **`release`** — single writer that hard-gates on all 6 AOT artifacts being
+3. **`release`** — single writer that hard-gates on all 5 AOT artifacts being
    present, builds a unified `manifest.json` with cross-platform SHA-256
    hashes (computed in one Linux shell for consistency), and uploads every
    binary + sidecar + manifest to the GitHub release.
