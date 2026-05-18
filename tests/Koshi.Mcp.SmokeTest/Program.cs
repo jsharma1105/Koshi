@@ -175,6 +175,32 @@ const string V030MemoryFixtureJson = """
       "LastAccessedAt": "2026-04-01T10:00:00+00:00",
       "AccessCount": 3,
       "Tier": "Warm"
+    },
+    {
+      "Id": "mem-v051-scope-a",
+      "Type": "Fact",
+      "Content": "Project-A scoped marker: xkrythogue_alpha_token. Should be visible only when workspaceId='project-a'.",
+      "Subject": "scope-fixture-project-a",
+      "Scope": { "UserId": "*", "WorkspaceId": "project-a", "ThreadId": null },
+      "Source": "v051-fixture",
+      "Confidence": 0.9,
+      "CreatedAt": "2026-05-19T10:00:00+00:00",
+      "LastAccessedAt": "2026-05-19T10:00:00+00:00",
+      "AccessCount": 0,
+      "Tier": "Hot"
+    },
+    {
+      "Id": "mem-v051-scope-b",
+      "Type": "Fact",
+      "Content": "Project-B scoped marker: yzephylgrum_beta_token. Must NOT leak when workspaceId='project-a' is requested.",
+      "Subject": "scope-fixture-project-b",
+      "Scope": { "UserId": "*", "WorkspaceId": "project-b", "ThreadId": null },
+      "Source": "v051-fixture",
+      "Confidence": 0.9,
+      "CreatedAt": "2026-05-19T10:00:00+00:00",
+      "LastAccessedAt": "2026-05-19T10:00:00+00:00",
+      "AccessCount": 0,
+      "Tier": "Hot"
     }
   ]
 }
@@ -483,6 +509,85 @@ if (preSeededMemoryFile is not null)
         else
         {
             Console.Error.WriteLine("[ok] memory-compat: v0.3.0 Pattern/Warm memory loaded under v0.4.0 source-gen");
+        }
+    }
+
+    // ─── Phase 3.5.1: v0.5.1 koshi_recall scope filtering + BM25 (#24) ──
+    // Asserts that the workspaceId filter is honoured: a recall scoped to
+    // 'project-a' must return the project-A marker token but MUST NOT leak
+    // the project-B marker. Pre-v0.5.1 koshi_recall ignored MemoryScope
+    // entirely (substring-on-content only), so this regression-guards both
+    // the filter and the BM25-ranked (non-substring) match.
+    var scopeAResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new
+        {
+            query = "scoped marker token",
+            type = "All",
+            topK = 5,
+            workspaceId = "project-a",
+        }
+    });
+    if (scopeAResp is null)
+    {
+        failures.Add("recall-scope: project-a recall TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(scopeAResp.Value);
+        if (text is null)
+        {
+            failures.Add("recall-scope: project-a recall returned no text");
+        }
+        else if (!text.Contains("xkrythogue_alpha_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-a marker missing from workspaceId='project-a' recall. Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else if (text.Contains("yzephylgrum_beta_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-b marker LEAKED into workspaceId='project-a' recall (#24 scope filter regression). Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] recall-scope: workspaceId filter isolates project-a from project-b (#24)");
+        }
+    }
+
+    // Inverse direction: workspaceId='project-b' must see beta but not alpha.
+    var scopeBResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new
+        {
+            query = "scoped marker token",
+            type = "All",
+            topK = 5,
+            workspaceId = "project-b",
+        }
+    });
+    if (scopeBResp is null)
+    {
+        failures.Add("recall-scope: project-b recall TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(scopeBResp.Value);
+        if (text is null)
+        {
+            failures.Add("recall-scope: project-b recall returned no text");
+        }
+        else if (!text.Contains("yzephylgrum_beta_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-b marker missing from workspaceId='project-b' recall. Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else if (text.Contains("xkrythogue_alpha_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-a marker LEAKED into workspaceId='project-b' recall (#24 scope filter regression). Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] recall-scope: workspaceId filter isolates project-b from project-a (#24)");
         }
     }
 }
