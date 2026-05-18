@@ -102,7 +102,10 @@ psi.StandardOutputEncoding = Encoding.UTF8;
     var stderrTask = vproc.StandardError.ReadToEndAsync();
     if (!vproc.WaitForExit(5000))
     {
-        try { vproc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+        try { vproc.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { /* best effort */ }
+        catch (System.ComponentModel.Win32Exception) { /* best effort */ }
+        catch (NotSupportedException) { /* best effort */ }
         Console.Error.WriteLine("[--version] FAIL: process did not exit within 5s (likely hung reading stdin).");
         return 1;
     }

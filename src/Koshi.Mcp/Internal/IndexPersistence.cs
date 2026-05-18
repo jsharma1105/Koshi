@@ -49,7 +49,22 @@ internal sealed class IndexPersistence
 
             return envelope;
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            Console.Error.WriteLine($"[koshi] Failed to load index file '{Path}': {ex.Message}");
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.Error.WriteLine($"[koshi] Failed to load index file '{Path}': {ex.Message}");
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"[koshi] Failed to load index file '{Path}': {ex.Message}");
+            return null;
+        }
+        catch (NotSupportedException ex)
         {
             Console.Error.WriteLine($"[koshi] Failed to load index file '{Path}': {ex.Message}");
             return null;
@@ -80,7 +95,12 @@ internal sealed class IndexPersistence
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, Path, overwrite: true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException
+            or JsonException)
         {
             Console.Error.WriteLine($"[koshi] Failed to save index file '{Path}': {ex.Message}");
         }
@@ -94,7 +114,12 @@ internal sealed class IndexPersistence
         {
             File.Delete(Path);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is UnauthorizedAccessException ||
+            ex is IOException ||
+            ex is System.Security.SecurityException ||
+            ex is NotSupportedException ||
+            ex is ArgumentException)
         {
             Console.Error.WriteLine($"[koshi] Failed to delete index file '{Path}': {ex.Message}");
         }
