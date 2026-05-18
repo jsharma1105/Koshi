@@ -116,7 +116,7 @@ jobs:
             runner: ubuntu-22.04-arm
             ext: ''
           - rid: osx-x64
-            runner: macos-13
+            runner: macos-13-large
             ext: ''
           - rid: osx-arm64
             runner: macos-14
