@@ -32,9 +32,18 @@ public sealed class RetrievalTools
     private static string? _indexedFromPath;
     private static IndexEnumerationParams? _indexedEnumeration;
     private static bool _isIndexed;
-    private static bool _autoIndexAttempted;
     private static bool _snapshotLoadAttempted;
     private static bool _loadedFromSnapshot;
+
+    // Auto-index retry state (#31). Until v0.5.0 we tracked a one-shot
+    // `_autoIndexAttempted` bool, which permanently blocked retries after a
+    // single failure — even if the user fixed the env var or the directory
+    // appeared later. We now throttle re-attempts on a per-path basis: a
+    // failed auto-index returns the same error for AutoIndexRetryAfter, then
+    // the next search re-runs the attempt.
+    private static DateTimeOffset _lastAutoIndexAttempt = DateTimeOffset.MinValue;
+    private static string? _lastAutoIndexFailureMessage;
+    private static readonly TimeSpan AutoIndexRetryAfter = TimeSpan.FromSeconds(30);
 
     static RetrievalTools()
     {
@@ -185,23 +194,43 @@ public sealed class RetrievalTools
 
         EnsureCorpusLoaded();
 
-        if (!_isIndexed && !_autoIndexAttempted)
+        if (!_isIndexed)
         {
-            _autoIndexAttempted = true;
             var envPath = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
-            if (!string.IsNullOrEmpty(envPath))
-            {
-                var auto = IndexDirectory(envPath);
-                if (auto.StartsWith('❌'))
-                {
-                    return "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
-                }
-            }
-            else
+            if (string.IsNullOrEmpty(envPath))
             {
                 return "❌ No documents indexed. Call koshi_index_directory(path) first, " +
                        "or set the KOSHI_INDEX_PATH / KOSHI_INDEX_FILE environment variable in your MCP client config.";
             }
+
+            // Throttle: if the most recent attempt failed and the retry window
+            // hasn't elapsed, surface the cached failure WITHOUT re-running
+            // the (potentially slow) directory enumeration. Outside the
+            // window, retry — this is the #31 fix vs. the old one-shot block.
+            var now = DateTimeOffset.UtcNow;
+            var sinceLastAttempt = now - _lastAutoIndexAttempt;
+            if (_lastAutoIndexFailureMessage is not null && sinceLastAttempt < AutoIndexRetryAfter)
+            {
+                var retryIn = AutoIndexRetryAfter - sinceLastAttempt;
+                return _lastAutoIndexFailureMessage +
+                       $"\n(next auto-retry in {Math.Max(1, (int)Math.Ceiling(retryIn.TotalSeconds))}s; " +
+                       $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
+            }
+
+            _lastAutoIndexAttempt = now;
+            Console.Error.WriteLine($"[koshi] auto-indexing from KOSHI_INDEX_PATH='{envPath}'");
+            var auto = IndexDirectory(envPath);
+            if (auto.StartsWith('❌'))
+            {
+                var failureMsg = "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
+                _lastAutoIndexFailureMessage = failureMsg;
+                return failureMsg +
+                       $"\n(next auto-retry in {AutoIndexRetryAfter.TotalSeconds:F0}s; " +
+                       $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
+            }
+
+            // Success: clear the failure cache so subsequent re-clears + retries start fresh.
+            _lastAutoIndexFailureMessage = null;
         }
 
         KeywordRetriever retriever;
@@ -280,9 +309,12 @@ public sealed class RetrievalTools
             _indexedFromPath = null;
             _indexedEnumeration = null;
             _isIndexed = false;
-            _autoIndexAttempted = false;
             _snapshotLoadAttempted = true; // Don't auto-reload a stale snapshot we just cleared.
             _loadedFromSnapshot = false;
+            // Reset auto-index retry throttle so the next koshi_search can
+            // re-attempt KOSHI_INDEX_PATH immediately (#31).
+            _lastAutoIndexAttempt = DateTimeOffset.MinValue;
+            _lastAutoIndexFailureMessage = null;
         }
 
         deletedSnapshot = _persistence.IsEnabled && File.Exists(_persistence.Path!);
@@ -368,8 +400,11 @@ public sealed class RetrievalTools
             _indexedFromPath = envelope.SourcePath;
             _indexedEnumeration = envelope.Enumeration;
             _isIndexed = true;
-            _autoIndexAttempted = true; // Snapshot satisfied the need; skip env-var auto-index.
             _loadedFromSnapshot = true;
+            // Snapshot satisfied the indexed-state requirement; clear any
+            // prior auto-index failure cache so the throttle starts fresh
+            // if a future koshi_clear_index + retry is needed (#31).
+            _lastAutoIndexFailureMessage = null;
         }
 
         Console.Error.WriteLine(
@@ -391,9 +426,12 @@ public sealed class RetrievalTools
             _indexedFromPath = source;
             _indexedEnumeration = enumeration;
             _isIndexed = true;
-            _autoIndexAttempted = true;
             _snapshotLoadAttempted = true;
             _loadedFromSnapshot = false;
+            // ReplaceIndex was called explicitly — clear any prior auto-index
+            // failure cache so a future clear + retry isn't blocked by stale
+            // throttle state (#31).
+            _lastAutoIndexFailureMessage = null;
         }
 
         _persistence.Save(source, fingerprint, enumeration, chunks);

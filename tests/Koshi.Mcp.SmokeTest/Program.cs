@@ -281,6 +281,18 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or S
     preSeededIndexFile = null;
 }
 
+// Set KOSHI_INDEX_PATH to a path that definitely won't exist. This is used
+// by the #31 auto-index-retry assertion: after Phase 4's koshi_clear_index,
+// two consecutive koshi_search calls must BOTH surface the "Auto-index from
+// KOSHI_INDEX_PATH failed" error (the old code would only emit it once,
+// then fall through to a generic "No documents indexed" message).
+var badAutoIndexPath = Path.Join(
+    Path.GetTempPath(),
+    $"koshi-smoke-bad-autoindex-{Guid.NewGuid():N}",
+    "does-not-exist");
+psi.Environment["KOSHI_INDEX_PATH"] = badAutoIndexPath;
+Console.Error.WriteLine($"[setup] KOSHI_INDEX_PATH (intentionally bad) = {badAutoIndexPath}");
+
 Console.Error.WriteLine($"=== Launching: {psi.FileName} {psi.Arguments} ===");
 var proc = Process.Start(psi)!;
 
@@ -675,6 +687,49 @@ if (preSeededIndexFile is not null && File.Exists(preSeededIndexFile))
 else if (preSeededIndexFile is not null)
 {
     Console.Error.WriteLine("[ok] index-persist: snapshot deleted by koshi_clear_index");
+}
+
+// ─── Phase 4.1: #31 auto-index retry after failure ─────────────────────
+// After koshi_clear_index, _isIndexed=false and the auto-index throttle is
+// also reset. Because KOSHI_INDEX_PATH points to a path that doesn't exist,
+// the next koshi_search must surface the "Auto-index from KOSHI_INDEX_PATH
+// failed" message. Pre-#31 code returned that message ONCE then fell through
+// to a generic "No documents indexed" — so the second consecutive call would
+// LOSE the diagnostic. With #31, the throttle caches the failure message
+// and replays it (with a retry countdown) for AutoIndexRetryAfter seconds,
+// then attempts again. Asserting that BOTH responses contain the failure
+// preamble guards against the regression.
+{
+    var firstRetry = await RpcAsync("tools/call", new
+    {
+        name = "koshi_search",
+        arguments = new { query = "anything", topK = 1 }
+    });
+    var secondRetry = await RpcAsync("tools/call", new
+    {
+        name = "koshi_search",
+        arguments = new { query = "anything else", topK = 1 }
+    });
+
+    string? FirstText(JsonElement? e) => e is { } v ? ExtractFirstText(v) : null;
+    var t1 = FirstText(firstRetry);
+    var t2 = FirstText(secondRetry);
+    const string expectedFragment = "Auto-index from KOSHI_INDEX_PATH failed";
+
+    if (t1 is null) failures.Add("auto-index-retry: 1st search returned no text");
+    else if (!t1.Contains(expectedFragment, StringComparison.Ordinal))
+        failures.Add($"auto-index-retry: 1st search missing '{expectedFragment}'. Got: {t1[..Math.Min(240, t1.Length)]}");
+
+    if (t2 is null) failures.Add("auto-index-retry: 2nd search returned no text (regression — #31)");
+    else if (!t2.Contains(expectedFragment, StringComparison.Ordinal))
+        failures.Add($"auto-index-retry: 2nd search missing '{expectedFragment}' (one-shot regression — #31). Got: {t2[..Math.Min(240, t2.Length)]}");
+
+    if (t1 is not null && t2 is not null
+        && t1.Contains(expectedFragment, StringComparison.Ordinal)
+        && t2.Contains(expectedFragment, StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine("[ok] auto-index-retry: both consecutive searches surface throttled failure (#31)");
+    }
 }
 
 // Memory (5)
