@@ -78,6 +78,55 @@ psi.UseShellExecute = false;
 psi.StandardInputEncoding = Encoding.UTF8;
 psi.StandardOutputEncoding = Encoding.UTF8;
 
+// ─── Pre-check: `--version` exits cleanly without starting the server ─────
+// Regression guard for the bug where `koshi-mcp --version` would hang
+// forever because args were silently ignored and the host went straight
+// into reading JSON-RPC off stdin. Validates that:
+//   1. Process exits within a couple of seconds (not hung on stdin).
+//   2. Exit code is 0.
+//   3. Stdout starts with the literal "koshi-mcp " banner.
+//   4. When `--expected-version` is set (CI), stdout contains that version.
+// Runs against the same binary the rest of the smoke test will spawn, so
+// any AOT-specific regression (e.g. missing trimmer roots) is caught here.
+{
+    var versionPsi = exePath is not null
+        ? new ProcessStartInfo(exePath, "--version")
+        : new ProcessStartInfo("dotnet", $"\"{dllPath}\" --version");
+    versionPsi.RedirectStandardOutput = true;
+    versionPsi.RedirectStandardError = true;
+    versionPsi.UseShellExecute = false;
+    versionPsi.StandardOutputEncoding = Encoding.UTF8;
+
+    var vproc = Process.Start(versionPsi)!;
+    var stdoutTask = vproc.StandardOutput.ReadToEndAsync();
+    var stderrTask = vproc.StandardError.ReadToEndAsync();
+    if (!vproc.WaitForExit(5000))
+    {
+        try { vproc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+        Console.Error.WriteLine("[--version] FAIL: process did not exit within 5s (likely hung reading stdin).");
+        return 1;
+    }
+    var vout = (await stdoutTask).Trim();
+    var verr = (await stderrTask).Trim();
+    Console.Error.WriteLine($"[--version] exit={vproc.ExitCode}  stdout='{vout}'");
+    if (verr.Length > 0) Console.Error.WriteLine($"[--version] stderr='{verr}'");
+    if (vproc.ExitCode != 0)
+    {
+        Console.Error.WriteLine($"[--version] FAIL: non-zero exit code {vproc.ExitCode}.");
+        return 1;
+    }
+    if (!vout.StartsWith("koshi-mcp ", StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine("[--version] FAIL: stdout did not start with 'koshi-mcp '.");
+        return 1;
+    }
+    if (expectedVersion is not null && !vout.Contains(expectedVersion, StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine($"[--version] FAIL: expected version '{expectedVersion}' not in stdout.");
+        return 1;
+    }
+}
+
 // ─── Pre-seed a v0.3.0-shaped memory file ────────────────────────────────
 // Validates that the v0.4.0 AOT source-generated JsonSerializerContext can
 // still read memory files written by v0.3.0's manual JsonSerializerOptions

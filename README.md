@@ -75,7 +75,8 @@ curl -L -o koshi-mcp.sha256 \
   https://github.com/jsharma1105/Koshi/releases/latest/download/koshi-mcp-linux-x64.sha256
 sha256sum -c <(awk '{print $1"  koshi-mcp"}' koshi-mcp.sha256)
 chmod +x koshi-mcp
-./koshi-mcp  # speaks MCP over stdio
+./koshi-mcp --version  # prints "koshi-mcp X.Y.Z+<sha>" and exits
+./koshi-mcp            # speaks MCP over stdio
 ```
 
 ## Why you'd use this instead of writing it yourself

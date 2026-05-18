@@ -202,6 +202,7 @@ Any MCP client that supports stdio transport works:
 ```bash
 # The server reads JSON-RPC on stdin and writes responses on stdout.
 # Logs go to stderr exclusively — stdout is reserved for the protocol.
+# Pass `--version` or `--help` for one-shot informational output.
 koshi-mcp
 ```
 

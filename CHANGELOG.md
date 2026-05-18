@@ -5,6 +5,25 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-17
+
+### Fixed
+- **`koshi-mcp --version` and `koshi-mcp --help` no longer hang.** In v0.4.0
+  any command-line argument was silently ignored and the server went straight
+  into reading JSON-RPC off stdin — so `koshi-mcp --version` would sit
+  forever printing only the `StdioServerTransport reading messages` log line.
+  The binary now recognises `--version`/`-v` (prints `koshi-mcp X.Y.Z+<sha>`
+  and exits 0) and `--help`/`-h`/`-?` (prints short usage and exits 0). The
+  parser is hand-written, AOT-safe, and uses no third-party CLI library.
+- **Smoke-test pre-check.** `Koshi.Mcp.SmokeTest` now spawns the binary with
+  `--version` before the JSON-RPC handshake and asserts it exits within
+  5 seconds with the expected banner, so every AOT RID in the release
+  matrix catches any regression of this kind.
+
+### No behavior changes
+- All 20 MCP tools accept the same arguments and return the same shapes as
+  v0.4.0. The MCP server's default mode (no args) is byte-identical.
+
 ## [0.4.0] - 2026-05-17
 
 ### Added
