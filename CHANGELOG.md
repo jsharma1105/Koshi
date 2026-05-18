@@ -5,6 +5,36 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-19
+
+### Fixed
+- **`koshi_recall` now honours `MemoryScope` and uses BM25 ranking (#24).**
+  Pre-v0.5.1 recall ignored the per-memory `Scope` (UserId/WorkspaceId/ThreadId)
+  entirely and ranked candidates by case-insensitive substring matching on
+  content, which meant memories tagged for one workspace could leak into
+  another's recall and stem-different queries (`"authenticate"` vs.
+  `"authentication"`) wouldn't match. The tool now accepts optional
+  `userId` / `workspaceId` / `threadId` parameters: workspace and thread
+  filters are exact-match, the user filter additionally always lets
+  globally-scoped memories (`UserId="*"`) through. Ranking is
+  `0.6·normalized_BM25 + 0.3·recency + 0.1·confidence`, with a `BM25 > 0`
+  gate so pure recency/confidence hits don't surface unrelated memories.
+  `koshi_remember` accepts the same three optional scope parameters and
+  defaults to `UserId="*", WorkspaceId="default"` for byte-identical
+  behaviour when callers omit them. Each recalled result now shows its
+  scope so the user can see WHY a memory matched.
+- **Auto-index from `KOSHI_INDEX_PATH` retries after a 30 s throttle
+  instead of giving up forever after the first failure (#31).** Previously
+  a single transient failure (e.g. directory not yet mounted, permission
+  issue) flipped a one-shot `_autoIndexAttempted` flag that blocked all
+  subsequent auto-indexing for the lifetime of the process — every
+  later `koshi_search` would silently fall through to a generic
+  "No documents indexed" message. The throttle now caches the failure
+  text and replays it (with a countdown to the next retry) for 30 s,
+  then re-attempts on the next search. Successful indexing clears the
+  cache. The error message also tells the user how to retry immediately
+  (`koshi_index_directory(path)`) without waiting for the throttle.
+
 ## [0.5.0] - 2026-05-18
 
 ### Added
