@@ -63,9 +63,9 @@ koshi-agents install --client both
 
 Every [GitHub release](https://github.com/jsharma1105/Koshi/releases) ships
 self-contained single-file `koshi-mcp` binaries for `linux-x64`, `linux-arm64`,
-`osx-x64`, `osx-arm64`, `win-x64`, and `win-arm64`, plus matching `.sha256`
-sidecars and a `manifest.json`. Run them on a clean machine without any .NET
-runtime installed.
+`osx-arm64`, `win-x64`, and `win-arm64`, plus matching `.sha256` sidecars and
+a `manifest.json`. Run them on a clean machine without any .NET runtime
+installed. (Intel Macs: use `dotnet tool install --global Koshi.Mcp`.)
 
 ```bash
 # Linux x64 example — adapt RID for your platform

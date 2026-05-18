@@ -43,7 +43,7 @@ _RID_MAP: dict[tuple[str, str], str] = {
     ("Linux", "x86_64"): "linux-x64",
     ("Linux", "aarch64"): "linux-arm64",
     ("Linux", "arm64"): "linux-arm64",
-    ("Darwin", "x86_64"): "osx-x64",
+    # ("Darwin", "x86_64"): "osx-x64",  # Intel Mac not published as of v0.4.0
     ("Darwin", "arm64"): "osx-arm64",
     ("Windows", "AMD64"): "win-x64",
     ("Windows", "x86_64"): "win-x64",
@@ -60,8 +60,14 @@ def detect_rid() -> str:
     machine = platform.machine()
     rid = _RID_MAP.get((system, machine))
     if rid is None:
+        hint = ""
+        if system == "Darwin" and machine == "x86_64":
+            hint = (
+                " (Intel Macs are not in the AOT release matrix as of v0.4.0; "
+                "Apple stopped shipping Intel Macs in 2023.)"
+            )
         raise UnsupportedPlatformError(
-            f"No published Koshi AOT artifact for {system}/{machine}. "
+            f"No published Koshi AOT artifact for {system}/{machine}.{hint} "
             f"Install .NET 10 and `dotnet tool install --global Koshi.Mcp` instead, "
             f"then set KOSHI_BIN to the resulting koshi-mcp executable."
         )

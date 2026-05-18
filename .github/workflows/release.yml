@@ -57,7 +57,7 @@ jobs:
 
       - name: MCP smoke test (DLL)
         # First guard: confirms the JIT-compiled DLL still speaks MCP cleanly
-        # before we burn 6 AOT matrix runs to repeat the experiment.
+        # before we burn 5 AOT matrix runs to repeat the experiment.
         run: dotnet run --project tests/Koshi.Mcp.SmokeTest -c Release --no-build
 
       - name: Pack Koshi.Mcp
@@ -96,7 +96,7 @@ jobs:
           path: nupkg/
           retention-days: 30
 
-  # ─── 2. Native AOT matrix (6 RIDs) ───────────────────────────────────────
+  # ─── 2. Native AOT matrix (5 RIDs; Intel Mac omitted) ────────────────────
   # Each row publishes Koshi.Mcp as a self-contained, single-file AOT binary
   # for its RID, smoke-tests the binary against the full MCP surface, and
   # uploads it as a workflow artifact. Hashes are computed by the
@@ -115,9 +115,10 @@ jobs:
           - rid: linux-arm64
             runner: ubuntu-22.04-arm
             ext: ''
-          - rid: osx-x64
-            runner: macos-13-large
-            ext: ''
+          # osx-x64 (Intel Mac) deliberately not in the matrix as of v0.4.0:
+          # GitHub-hosted macos-13 / macos-13-large runners are unreliably
+          # provisioned, and Apple stopped shipping Intel Macs in 2023. Intel
+          # macOS users should `dotnet tool install --global Koshi.Mcp` instead.
           - rid: osx-arm64
             runner: macos-14
             ext: ''
@@ -212,13 +213,14 @@ jobs:
         with:
           path: artifacts
 
-      - name: Verify all 6 AOT RIDs present (hard gate)
-        # Per the "all 6 platforms or no release" failure policy: if any
-        # RID's matrix job failed, abort the release here.
+      - name: Verify all 5 AOT RIDs present (hard gate)
+        # Per the "all published platforms or no release" failure policy: if
+        # any RID's matrix job failed, abort the release here. osx-x64 is
+        # deliberately excluded from the matrix (see comment in `aot` job).
         run: |
           set -e
           missing=()
-          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64 win-arm64; do
             case "$rid" in win-*) ext=.exe ;; *) ext= ;; esac
             f="artifacts/aot-$rid/koshi-mcp-$rid$ext"
             if [ ! -f "$f" ]; then missing+=("$f"); fi
@@ -228,7 +230,7 @@ jobs:
             printf '::error::  - %s\n' "${missing[@]}"
             exit 1
           fi
-          echo "All 6 RIDs present."
+          echo "All 5 RIDs present."
 
       - name: Compute hashes, generate manifest.json, stage release/
         shell: bash
@@ -251,7 +253,7 @@ jobs:
             echo '  "release_url_template": "https://github.com/jsharma1105/Koshi/releases/download/v{version}/{filename}",'
             echo '  "binaries": {'
             first=1
-            for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            for rid in linux-x64 linux-arm64 osx-arm64 win-x64 win-arm64; do
               case "$rid" in win-*) ext=.exe ;; *) ext= ;; esac
               src="artifacts/aot-$rid/koshi-mcp-$rid$ext"
               dst="release/koshi-mcp-$rid$ext"
