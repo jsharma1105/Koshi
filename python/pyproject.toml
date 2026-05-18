@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "koshi"
-version = "0.4.0"
+version = "0.5.0"
 description = "Python client for the Koshi MCP server — retrieval, memory, context, and quality tools for any LLM workflow. Auto-downloads a native AOT binary; no .NET install required."
 readme = "README.md"
 license = { text = "MIT" }

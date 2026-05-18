@@ -10,7 +10,7 @@ PyPI wheel is built with the injected manifest baked in.
 
 from __future__ import annotations
 
-VERSION: str = "0.4.0"
+VERSION: str = "0.4.1"
 
 RELEASE_URL_TEMPLATE: str = (
     "https://github.com/jsharma1105/Koshi/releases/download/v{version}/{filename}"

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Koshi.Core.Memory;
+using Koshi.Core.Models;
 
 namespace Koshi.Mcp.Internal;
 
@@ -27,4 +28,10 @@ namespace Koshi.Mcp.Internal;
 [JsonSerializable(typeof(MemoryTier))]
 [JsonSerializable(typeof(DocInput))]
 [JsonSerializable(typeof(List<DocInput>))]
+[JsonSerializable(typeof(IndexEnvelope))]
+[JsonSerializable(typeof(IndexEnumerationParams))]
+[JsonSerializable(typeof(Chunk))]
+[JsonSerializable(typeof(ChunkMetadata))]
+[JsonSerializable(typeof(List<Chunk>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class KoshiJsonContext : JsonSerializerContext;
