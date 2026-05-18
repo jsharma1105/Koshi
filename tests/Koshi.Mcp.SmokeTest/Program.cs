@@ -175,6 +175,32 @@ const string V030MemoryFixtureJson = """
       "LastAccessedAt": "2026-04-01T10:00:00+00:00",
       "AccessCount": 3,
       "Tier": "Warm"
+    },
+    {
+      "Id": "mem-v051-scope-a",
+      "Type": "Fact",
+      "Content": "Project-A scoped marker: xkrythogue_alpha_token. Should be visible only when workspaceId='project-a'.",
+      "Subject": "scope-fixture-project-a",
+      "Scope": { "UserId": "*", "WorkspaceId": "project-a", "ThreadId": null },
+      "Source": "v051-fixture",
+      "Confidence": 0.9,
+      "CreatedAt": "2026-05-19T10:00:00+00:00",
+      "LastAccessedAt": "2026-05-19T10:00:00+00:00",
+      "AccessCount": 0,
+      "Tier": "Hot"
+    },
+    {
+      "Id": "mem-v051-scope-b",
+      "Type": "Fact",
+      "Content": "Project-B scoped marker: yzephylgrum_beta_token. Must NOT leak when workspaceId='project-a' is requested.",
+      "Subject": "scope-fixture-project-b",
+      "Scope": { "UserId": "*", "WorkspaceId": "project-b", "ThreadId": null },
+      "Source": "v051-fixture",
+      "Confidence": 0.9,
+      "CreatedAt": "2026-05-19T10:00:00+00:00",
+      "LastAccessedAt": "2026-05-19T10:00:00+00:00",
+      "AccessCount": 0,
+      "Tier": "Hot"
     }
   ]
 }
@@ -254,6 +280,18 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or S
     Console.Error.WriteLine($"[setup] WARN: failed to seed index fixture: {ex.Message}");
     preSeededIndexFile = null;
 }
+
+// Set KOSHI_INDEX_PATH to a path that definitely won't exist. This is used
+// by the #31 auto-index-retry assertion: after Phase 4's koshi_clear_index,
+// two consecutive koshi_search calls must BOTH surface the "Auto-index from
+// KOSHI_INDEX_PATH failed" error (the old code would only emit it once,
+// then fall through to a generic "No documents indexed" message).
+var badAutoIndexPath = Path.Join(
+    Path.GetTempPath(),
+    $"koshi-smoke-bad-autoindex-{Guid.NewGuid():N}",
+    "does-not-exist");
+psi.Environment["KOSHI_INDEX_PATH"] = badAutoIndexPath;
+Console.Error.WriteLine($"[setup] KOSHI_INDEX_PATH (intentionally bad) = {badAutoIndexPath}");
 
 Console.Error.WriteLine($"=== Launching: {psi.FileName} {psi.Arguments} ===");
 var proc = Process.Start(psi)!;
@@ -485,6 +523,85 @@ if (preSeededMemoryFile is not null)
             Console.Error.WriteLine("[ok] memory-compat: v0.3.0 Pattern/Warm memory loaded under v0.4.0 source-gen");
         }
     }
+
+    // ─── Phase 3.5.1: v0.5.1 koshi_recall scope filtering + BM25 (#24) ──
+    // Asserts that the workspaceId filter is honoured: a recall scoped to
+    // 'project-a' must return the project-A marker token but MUST NOT leak
+    // the project-B marker. Pre-v0.5.1 koshi_recall ignored MemoryScope
+    // entirely (substring-on-content only), so this regression-guards both
+    // the filter and the BM25-ranked (non-substring) match.
+    var scopeAResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new
+        {
+            query = "scoped marker token",
+            type = "All",
+            topK = 5,
+            workspaceId = "project-a",
+        }
+    });
+    if (scopeAResp is null)
+    {
+        failures.Add("recall-scope: project-a recall TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(scopeAResp.Value);
+        if (text is null)
+        {
+            failures.Add("recall-scope: project-a recall returned no text");
+        }
+        else if (!text.Contains("xkrythogue_alpha_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-a marker missing from workspaceId='project-a' recall. Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else if (text.Contains("yzephylgrum_beta_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-b marker LEAKED into workspaceId='project-a' recall (#24 scope filter regression). Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] recall-scope: workspaceId filter isolates project-a from project-b (#24)");
+        }
+    }
+
+    // Inverse direction: workspaceId='project-b' must see beta but not alpha.
+    var scopeBResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_recall",
+        arguments = new
+        {
+            query = "scoped marker token",
+            type = "All",
+            topK = 5,
+            workspaceId = "project-b",
+        }
+    });
+    if (scopeBResp is null)
+    {
+        failures.Add("recall-scope: project-b recall TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(scopeBResp.Value);
+        if (text is null)
+        {
+            failures.Add("recall-scope: project-b recall returned no text");
+        }
+        else if (!text.Contains("yzephylgrum_beta_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-b marker missing from workspaceId='project-b' recall. Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else if (text.Contains("xkrythogue_alpha_token", StringComparison.Ordinal))
+        {
+            failures.Add($"recall-scope: project-a marker LEAKED into workspaceId='project-b' recall (#24 scope filter regression). Response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] recall-scope: workspaceId filter isolates project-b from project-a (#24)");
+        }
+    }
 }
 
 // ─── Phase 3.6: index file persistence (KOSHI_INDEX_FILE) ──────────────
@@ -570,6 +687,49 @@ if (preSeededIndexFile is not null && File.Exists(preSeededIndexFile))
 else if (preSeededIndexFile is not null)
 {
     Console.Error.WriteLine("[ok] index-persist: snapshot deleted by koshi_clear_index");
+}
+
+// ─── Phase 4.1: #31 auto-index retry after failure ─────────────────────
+// After koshi_clear_index, _isIndexed=false and the auto-index throttle is
+// also reset. Because KOSHI_INDEX_PATH points to a path that doesn't exist,
+// the next koshi_search must surface the "Auto-index from KOSHI_INDEX_PATH
+// failed" message. Pre-#31 code returned that message ONCE then fell through
+// to a generic "No documents indexed" — so the second consecutive call would
+// LOSE the diagnostic. With #31, the throttle caches the failure message
+// and replays it (with a retry countdown) for AutoIndexRetryAfter seconds,
+// then attempts again. Asserting that BOTH responses contain the failure
+// preamble guards against the regression.
+{
+    var firstRetry = await RpcAsync("tools/call", new
+    {
+        name = "koshi_search",
+        arguments = new { query = "anything", topK = 1 }
+    });
+    var secondRetry = await RpcAsync("tools/call", new
+    {
+        name = "koshi_search",
+        arguments = new { query = "anything else", topK = 1 }
+    });
+
+    string? FirstText(JsonElement? e) => e is { } v ? ExtractFirstText(v) : null;
+    var t1 = FirstText(firstRetry);
+    var t2 = FirstText(secondRetry);
+    const string expectedFragment = "Auto-index from KOSHI_INDEX_PATH failed";
+
+    if (t1 is null) failures.Add("auto-index-retry: 1st search returned no text");
+    else if (!t1.Contains(expectedFragment, StringComparison.Ordinal))
+        failures.Add($"auto-index-retry: 1st search missing '{expectedFragment}'. Got: {t1[..Math.Min(240, t1.Length)]}");
+
+    if (t2 is null) failures.Add("auto-index-retry: 2nd search returned no text (regression — #31)");
+    else if (!t2.Contains(expectedFragment, StringComparison.Ordinal))
+        failures.Add($"auto-index-retry: 2nd search missing '{expectedFragment}' (one-shot regression — #31). Got: {t2[..Math.Min(240, t2.Length)]}");
+
+    if (t1 is not null && t2 is not null
+        && t1.Contains(expectedFragment, StringComparison.Ordinal)
+        && t2.Contains(expectedFragment, StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine("[ok] auto-index-retry: both consecutive searches surface throttled failure (#31)");
+    }
 }
 
 // Memory (5)
