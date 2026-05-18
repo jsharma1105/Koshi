@@ -56,8 +56,9 @@ def test_versioned_cache_dir_includes_version(tmp_cache: Path) -> None:
     cache = binary.versioned_cache_dir()
     assert _manifest.VERSION in str(cache)
     assert cache.name == _manifest.VERSION
-    # Stale-version isolation: a v0.3.0 cache dir must NOT match a v0.4.0 lookup.
-    assert "0.4.0" in str(cache) or _manifest.VERSION in str(cache)
+    # Stale-version isolation: a cache dir for any other version must NOT match
+    # the current lookup. The path itself is version-pinned (no shared 'latest'
+    # dir), so a stale v0.3.0 download cannot be reused under v0.4.x.
 
 
 def test_resolve_binary_returns_koshi_bin_when_set(

@@ -38,10 +38,14 @@ public sealed class DiagnosticTools
         sb.AppendLine($"═══ Koshi Health (v{_version.Value}) ═══\n");
 
         sb.AppendLine("  Retrieval:");
-        sb.AppendLine($"    Indexed: {(indexStatus.indexed ? "yes" : "no")}");
-        sb.AppendLine($"    Chunks:  {indexStatus.chunkCount}");
-        sb.AppendLine($"    Sources: {indexStatus.sourceCount}");
-        sb.AppendLine($"    Path:    {indexStatus.path ?? "(none)"}");
+        sb.AppendLine($"    Indexed:     {(indexStatus.indexed ? "yes" : "no")}");
+        sb.AppendLine($"    Chunks:      {indexStatus.chunkCount}");
+        sb.AppendLine($"    Sources:     {indexStatus.sourceCount}");
+        sb.AppendLine($"    Path:        {indexStatus.path ?? "(none)"}");
+        sb.AppendLine($"    Persistence: {(indexStatus.persistenceEnabled ? "enabled" : "disabled")}");
+        sb.AppendLine($"    File:        {indexStatus.persistencePath ?? "(in-memory only)"}");
+        if (indexStatus.loadedFromSnapshot)
+            sb.AppendLine($"    Loaded:      from snapshot");
         sb.AppendLine();
 
         sb.AppendLine("  Memory:");
@@ -52,6 +56,7 @@ public sealed class DiagnosticTools
 
         sb.AppendLine("  Configuration (env vars):");
         sb.AppendLine($"    KOSHI_INDEX_PATH:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH") ?? "(unset)"}");
+        sb.AppendLine($"    KOSHI_INDEX_FILE:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE") ?? "(unset)"}");
         sb.AppendLine($"    KOSHI_MEMORY_FILE:  {Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE") ?? "(unset)"}");
         sb.AppendLine();
 

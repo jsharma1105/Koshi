@@ -59,6 +59,7 @@ Every method returns the formatted text response from the MCP server. The full K
 | `KOSHI_BIN` | Path to a `koshi-mcp` binary. Skips auto-download, overrides PATH lookup. Version still verified at spawn time. |
 | `KOSHI_MEMORY_FILE` | Persist memories to this JSON file across server restarts. Default: in-memory only. |
 | `KOSHI_INDEX_PATH` | Default directory for `search` / `index_directory` if you don't pass one. |
+| `KOSHI_INDEX_FILE` | Persist the BM25 retrieval index to this JSON file across server restarts. Auto-loads on first `search`; stale snapshots are invalidated by a `(relpath, size, mtime)` fingerprint check. Default: in-memory only. |
 
 ## Where binaries live
 
