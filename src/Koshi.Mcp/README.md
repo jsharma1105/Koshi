@@ -97,8 +97,8 @@ koshi-mcp --version    # should match the installed package version
 ### Option C — No-runtime download (Native AOT single-file binary)
 
 Every GitHub release ships self-contained `koshi-mcp` binaries (no .NET
-runtime required) for `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`,
-`win-x64`, and `win-arm64`, each with a `.sha256` sidecar. See the
+runtime required) for `linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64`,
+and `win-arm64`, each with a `.sha256` sidecar. See the
 [releases page](https://github.com/jsharma1105/Koshi/releases).
 
 ### Add to your MCP client

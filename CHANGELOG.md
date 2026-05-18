@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verifies it against SHA-256 hashes baked into the wheel at release time. No
   .NET install required for Python users.
 - **Native AOT release binaries** — single-file, self-contained `koshi-mcp`
-  executables for `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`,
-  `win-x64`, and `win-arm64`, attached to every GitHub release with
+  executables for `linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64`, and
+  `win-arm64`, attached to every GitHub release with
   `manifest.json` and `.sha256` sidecars. Run on a clean machine without any
   .NET runtime installed.
 - **AOT-clean engine** — `src/Koshi.Mcp` is now flagged `IsAotCompatible=true`
@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths verify error responses, and the `koshi_version` output is asserted to
   match the expected version stamp.
 - **4-stage release pipeline** — `release.yml` is now a DAG of `nuget` →
-  `aot` (matrix of 6 RIDs, fail-fast disabled) → `release` (single writer,
-  hard-gated on all 6 RIDs present) → `pypi` (gated on the
+  `aot` (matrix of 5 RIDs, fail-fast disabled) → `release` (single writer,
+  hard-gated on all 5 RIDs present) → `pypi` (gated on the
   `PUBLISH_PYPI` repo variable and the `pypi-release` environment).
 - **`scripts/inject-manifest.py`** — release-time helper that injects the
   binary SHA-256 hashes into the Python wheel's `_manifest.py` before the

@@ -22,7 +22,6 @@ from koshi.errors import (
         ("Linux", "x86_64", "linux-x64"),
         ("Linux", "aarch64", "linux-arm64"),
         ("Linux", "arm64", "linux-arm64"),
-        ("Darwin", "x86_64", "osx-x64"),
         ("Darwin", "arm64", "osx-arm64"),
         ("Windows", "AMD64", "win-x64"),
         ("Windows", "x86_64", "win-x64"),
@@ -41,6 +40,15 @@ def test_detect_rid_rejects_unsupported_platforms(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("platform.system", lambda: "FreeBSD")
     monkeypatch.setattr("platform.machine", lambda: "x86_64")
     with pytest.raises(UnsupportedPlatformError, match="FreeBSD"):
+        binary.detect_rid()
+
+
+def test_detect_rid_rejects_intel_mac_with_actionable_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    with pytest.raises(UnsupportedPlatformError, match="Intel Macs"):
         binary.detect_rid()
 
 
