@@ -5,7 +5,34 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - 2026-05-17
+## [0.5.0] - 2026-05-18
+
+### Added
+- **Persistent BM25 retrieval index via `KOSHI_INDEX_FILE`.** Setting this env
+  var to an absolute path makes Koshi save the indexed corpus on every
+  `koshi_index_directory` / `koshi_index` and auto-load it on first
+  `koshi_search` / `koshi_list_indexed`. Re-running against the same source
+  directory is a millisecond-level no-op instead of a 30 s re-chunk. Writes
+  are atomic (`temp → rename`), schema-versioned (`SchemaVersion: 1`), and
+  go through the AOT-safe source-generated `KoshiJsonContext`. When
+  unset, behaviour is byte-identical to v0.4.x — the index lives only for
+  the process lifetime.
+- **SHA-256 fingerprint invalidation.** Each on-disk snapshot records the
+  set of `(relpath, size, mtimeUtc)` tuples it was built from. On startup,
+  Koshi recomputes the fingerprint from the current filesystem; mismatches
+  (files added/removed/edited, or `KOSHI_INDEX_PATH` pointed at a different
+  directory) cause the stale snapshot to be discarded silently and a
+  re-index to run instead of serving stale results.
+- **`koshi_health` now reports retrieval persistence.** New "Index
+  persistence" block surfaces whether `KOSHI_INDEX_FILE` is wired up, the
+  resolved path, and whether the current corpus was loaded from a snapshot
+  vs freshly indexed. `KOSHI_INDEX_FILE` is also dumped in the env-var
+  section so misconfigurations are visible.
+- **Smoke-test coverage for the persistence round-trip.** `Koshi.Mcp.SmokeTest`
+  now pre-seeds an `IndexEnvelope` JSON fixture, sets `KOSHI_INDEX_FILE`,
+  and asserts (a) the snapshot auto-loads on first `koshi_search`,
+  (b) `koshi_index_directory` overwrites the file with a fresh snapshot,
+  and (c) `koshi_clear_index` deletes it. Runs on every AOT RID in CI.
 
 ### Fixed
 - **`koshi-mcp --version` and `koshi-mcp --help` no longer hang.** In v0.4.0
@@ -15,14 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The binary now recognises `--version`/`-v` (prints `koshi-mcp X.Y.Z+<sha>`
   and exits 0) and `--help`/`-h`/`-?` (prints short usage and exits 0). The
   parser is hand-written, AOT-safe, and uses no third-party CLI library.
-- **Smoke-test pre-check.** `Koshi.Mcp.SmokeTest` now spawns the binary with
-  `--version` before the JSON-RPC handshake and asserts it exits within
-  5 seconds with the expected banner, so every AOT RID in the release
-  matrix catches any regression of this kind.
+  `Koshi.Mcp.SmokeTest` now spawns the binary with `--version` before the
+  JSON-RPC handshake and asserts it exits within 5 seconds with the
+  expected banner, so every AOT RID in the release matrix catches any
+  regression of this kind.
 
-### No behavior changes
+### Docs
+- README now links both NuGet packages (`Koshi.Mcp`, `Koshi.Agents`) with
+  version + download badges.
+- `KOSHI_INDEX_FILE` documented alongside `KOSHI_MEMORY_FILE` in the MCP
+  server README, the Python quickstart, and the PyPI README.
+
+### No behavior changes when `KOSHI_INDEX_FILE` is unset
 - All 20 MCP tools accept the same arguments and return the same shapes as
-  v0.4.0. The MCP server's default mode (no args) is byte-identical.
+  v0.4.x. The MCP server's default mode (no env vars, no args) is
+  byte-identical for retrieval-tool outputs aside from the `koshi_health`
+  text expansion.
 
 ## [0.4.0] - 2026-05-17
 

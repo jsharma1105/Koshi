@@ -286,6 +286,7 @@ Koshi is configured exclusively through **environment variables** (no config fil
 | Env var | Default | Purpose |
 |---------|---------|---------|
 | `KOSHI_INDEX_PATH` | _(unset)_ | Absolute path that `koshi_search` will auto-index on first use. Without this, callers must invoke `koshi_index_directory` explicitly. |
+| `KOSHI_INDEX_FILE` | _(unset)_ | Absolute path to a JSON file used to persist the BM25 retrieval index across server restarts. On startup the snapshot is auto-loaded and validated against the live filesystem (`relpath + size + mtime` fingerprint); stale snapshots are discarded and a re-index runs. Atomic writes, schema-versioned. When unset, the index lives only for the current process and a re-chunk pass runs on every restart. |
 | `KOSHI_MEMORY_FILE` | _(unset)_ | Absolute path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. When unset, memories live only for the current process. |
 
 **Default safety limits** (hardcoded; tweakable per-call where applicable):
@@ -457,6 +458,7 @@ contains sensitive material.
 | `❌ No supported, readable files found in: ...` | The path is empty, contains only excluded files (binaries, build output, hidden dirs), or no files match the pattern. Check with `koshi_list_indexed` and try a wider `pattern`. |
 | MCP client can't connect | Check that `koshi-mcp` runs on its own (`koshi-mcp` then send a JSON-RPC line). Logs appear on stderr; nothing should print on stdout until a request arrives. |
 | Memories disappear on restart | Set `KOSHI_MEMORY_FILE` to an absolute path. The file is created automatically. |
+| Index re-built on every restart (slow) | Set `KOSHI_INDEX_FILE` to an absolute path. The snapshot auto-loads on first search; if the source directory has changed since it was saved, the fingerprint check discards it and a fresh re-index runs. |
 | Vulnerability warning during install | The MCP package itself is clean. Some sibling demo projects in the source repo pull in older transitive packages — these never reach `koshi-mcp`. |
 
 Use `koshi_health` from any MCP client to quickly inspect runtime configuration.

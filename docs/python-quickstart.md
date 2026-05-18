@@ -185,6 +185,7 @@ Full tool reference (every argument, every shape): [`src/Koshi.Mcp/README.md`](.
 | `KOSHI_BIN` | Path to a `koshi-mcp` binary. Skips auto-download, overrides PATH lookup. Version still verified at spawn time. |
 | `KOSHI_MEMORY_FILE` | Persist memories to this JSON file across server restarts. Default: in-memory only. |
 | `KOSHI_INDEX_PATH` | Default directory the server auto-indexes on first `search` if you don't pass one explicitly. |
+| `KOSHI_INDEX_FILE` | Persist the BM25 retrieval index to this JSON file across server restarts. On startup the snapshot auto-loads; if the source directory has drifted (file fingerprint mismatch) it's discarded and a fresh re-index runs. Default: in-memory only — every restart re-chunks from scratch. |
 
 ---
 

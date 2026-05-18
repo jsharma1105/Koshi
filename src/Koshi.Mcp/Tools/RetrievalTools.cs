@@ -25,11 +25,21 @@ public sealed class RetrievalTools
     private static readonly Lazy<TokenCounter> _tokenCounter = new(() =>
         TokenCounter.CreateAsync("gpt-4").GetAwaiter().GetResult());
 
+    private static readonly IndexPersistence _persistence;
+
     private static KeywordRetriever? _keywordRetriever;
     private static List<Chunk> _indexedChunks = [];
     private static string? _indexedFromPath;
+    private static IndexEnumerationParams? _indexedEnumeration;
     private static bool _isIndexed;
     private static bool _autoIndexAttempted;
+    private static bool _snapshotLoadAttempted;
+    private static bool _loadedFromSnapshot;
+
+    static RetrievalTools()
+    {
+        _persistence = new IndexPersistence(Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE"));
+    }
 
     [McpServerTool(Name = "koshi_index"), Description(
         "Index a list of in-memory documents for BM25 retrieval. " +
@@ -64,7 +74,7 @@ public sealed class RetrievalTools
         if (allChunks.Count > MaxChunks)
             return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Reduce document count or size.";
 
-        ReplaceIndex(allChunks, source: "in-memory");
+        ReplaceIndex(allChunks, source: ContentFingerprint.InMemorySource, enumeration: null);
         return $"✅ Indexed {docs.Count} documents → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens)";
     }
 
@@ -73,6 +83,8 @@ public sealed class RetrievalTools
         "If no path is provided, falls back to the KOSHI_INDEX_PATH environment variable. " +
         "Excludes secrets (.env*, *.pem, *.key, *.pfx, secrets.*), build output (bin/obj/dist/node_modules/.git), " +
         "and files larger than the configured limit. " +
+        "When KOSHI_INDEX_FILE is set, the resulting BM25 corpus is also persisted to disk so the next " +
+        "server start can serve searches without re-indexing. " +
         "This replaces any previously indexed corpus.")]
     public static string IndexDirectory(
         [Description("Absolute directory path to index (defaults to $KOSHI_INDEX_PATH)")]
@@ -96,10 +108,17 @@ public sealed class RetrievalTools
         if (maxFiles < 1) maxFiles = DefaultMaxFiles;
         long maxBytes = maxFileSizeKb * 1024L;
 
+        var enumeration = new IndexEnumerationParams
+        {
+            Pattern = string.IsNullOrWhiteSpace(pattern) ? null : pattern,
+            MaxFileSizeBytes = maxBytes,
+            MaxFiles = maxFiles,
+        };
+
         IEnumerable<string> files;
         try
         {
-            files = SafeFileEnumerator.EnumerateIndexableFiles(dirPath, pattern, maxBytes, maxFiles);
+            files = SafeFileEnumerator.EnumerateIndexableFiles(dirPath, enumeration.Pattern, maxBytes, maxFiles);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -142,17 +161,19 @@ public sealed class RetrievalTools
         if (allChunks.Count == 0)
             return "❌ All files were empty or unreadable.";
 
-        ReplaceIndex(allChunks, source: dirPath);
+        ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration);
 
         var msg = $"✅ Indexed {fileList.Count - skipped} files from '{dirPath}' → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens)";
         if (skipped > 0) msg += $" ({skipped} skipped)";
+        if (_persistence.IsEnabled) msg += $"\n   Snapshot saved → {_persistence.Path}";
         return msg;
     }
 
     [McpServerTool(Name = "koshi_search"), Description(
         "Search the indexed corpus using BM25 keyword retrieval. " +
         "Returns the most relevant chunks for the query. " +
-        "If no corpus is indexed and KOSHI_INDEX_PATH is set, the path will be auto-indexed once on first use.")]
+        "If no corpus is indexed and KOSHI_INDEX_FILE points to a valid snapshot, it is loaded automatically. " +
+        "Otherwise, if KOSHI_INDEX_PATH is set, the path will be auto-indexed once on first use.")]
     public static string Search(
         [Description("The search query")] string query,
         [Description("Number of results to return (1-50, default: 5)")] int topK = 5)
@@ -162,10 +183,9 @@ public sealed class RetrievalTools
 
         topK = Math.Clamp(topK < 1 ? 5 : topK, 1, MaxTopK);
 
-        bool needsIndex;
-        lock (_lock) { needsIndex = !_isIndexed || _keywordRetriever is null; }
+        EnsureCorpusLoaded();
 
-        if (needsIndex && !_autoIndexAttempted)
+        if (!_isIndexed && !_autoIndexAttempted)
         {
             _autoIndexAttempted = true;
             var envPath = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
@@ -180,7 +200,7 @@ public sealed class RetrievalTools
             else
             {
                 return "❌ No documents indexed. Call koshi_index_directory(path) first, " +
-                       "or set the KOSHI_INDEX_PATH environment variable in your MCP client config.";
+                       "or set the KOSHI_INDEX_PATH / KOSHI_INDEX_FILE environment variable in your MCP client config.";
             }
         }
 
@@ -218,6 +238,8 @@ public sealed class RetrievalTools
         "List all indexed documents grouped by source, with chunk counts and token totals.")]
     public static string ListIndexed()
     {
+        EnsureCorpusLoaded();
+
         lock (_lock)
         {
             if (!_isIndexed || _indexedChunks.Count == 0)
@@ -231,7 +253,7 @@ public sealed class RetrievalTools
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Indexed corpus: {_indexedChunks.Count} chunks from {bySource.Count} sources");
             if (_indexedFromPath is not null)
-                sb.AppendLine($"Source: {_indexedFromPath}");
+                sb.AppendLine($"Source: {_indexedFromPath}{(_loadedFromSnapshot ? " (loaded from snapshot)" : "")}");
             sb.AppendLine();
 
             foreach (var group in bySource)
@@ -244,48 +266,137 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_clear_index"), Description(
-        "Clear the indexed corpus. Useful when switching between projects without restarting the server.")]
+        "Clear the indexed corpus. Useful when switching between projects without restarting the server. " +
+        "Also removes the persisted snapshot file when KOSHI_INDEX_FILE is set.")]
     public static string ClearIndex()
     {
         int previousCount;
+        bool deletedSnapshot;
         lock (_lock)
         {
             previousCount = _indexedChunks.Count;
             _indexedChunks = [];
             _keywordRetriever = null;
             _indexedFromPath = null;
+            _indexedEnumeration = null;
             _isIndexed = false;
             _autoIndexAttempted = false;
+            _snapshotLoadAttempted = true; // Don't auto-reload a stale snapshot we just cleared.
+            _loadedFromSnapshot = false;
         }
-        return previousCount == 0
-            ? "Index already empty."
-            : $"✅ Cleared index ({previousCount} chunks removed).";
+
+        deletedSnapshot = _persistence.IsEnabled && File.Exists(_persistence.Path!);
+        _persistence.Delete();
+
+        if (previousCount == 0 && !deletedSnapshot)
+            return "Index already empty.";
+
+        var msg = previousCount > 0
+            ? $"✅ Cleared index ({previousCount} chunks removed)."
+            : "✅ Cleared index (in-memory was already empty).";
+        if (deletedSnapshot) msg += $"\n   Snapshot deleted → {_persistence.Path}";
+        return msg;
     }
 
-    internal static (int chunkCount, int sourceCount, string? path, bool indexed) GetStatus()
+    internal static (int chunkCount, int sourceCount, string? path, bool indexed, bool persistenceEnabled, string? persistencePath, bool loadedFromSnapshot) GetStatus()
     {
+        EnsureCorpusLoaded();
         lock (_lock)
         {
             var sourceCount = _indexedChunks.Count == 0
                 ? 0
                 : _indexedChunks.GroupBy(c => c.Metadata.Source).Count();
-            return (_indexedChunks.Count, sourceCount, _indexedFromPath, _isIndexed);
+            return (_indexedChunks.Count, sourceCount, _indexedFromPath, _isIndexed,
+                    _persistence.IsEnabled, _persistence.Path, _loadedFromSnapshot);
         }
     }
 
-    private static void ReplaceIndex(List<Chunk> chunks, string source)
+    /// <summary>
+    /// Attempts to populate the in-memory corpus from a persisted snapshot on first access.
+    /// No-op when persistence is disabled, no snapshot exists, or the snapshot is stale.
+    /// Called from every public entry point that observes index state.
+    /// </summary>
+    private static void EnsureCorpusLoaded()
+    {
+        lock (_lock)
+        {
+            if (_isIndexed || _snapshotLoadAttempted || !_persistence.IsEnabled) return;
+            _snapshotLoadAttempted = true;
+        }
+
+        var envelope = _persistence.LoadOrNull();
+        if (envelope is null || envelope.Chunks.Count == 0) return;
+
+        // Validate fingerprint when the snapshot has an on-disk source.
+        if (envelope.SourcePath is not null
+            && envelope.SourcePath != ContentFingerprint.InMemorySource
+            && envelope.ContentFingerprint is not null)
+        {
+            // Cross-check against KOSHI_INDEX_PATH when set — if the user
+            // pointed the server at a different directory than the snapshot
+            // came from, we must not silently serve stale results.
+            var envPath = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
+            if (!string.IsNullOrEmpty(envPath))
+            {
+                var resolved = Path.GetFullPath(envPath);
+                if (!string.Equals(resolved, envelope.SourcePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine(
+                        $"[koshi] Discarding index snapshot: source path '{envelope.SourcePath}' " +
+                        $"differs from KOSHI_INDEX_PATH '{resolved}'.");
+                    return;
+                }
+            }
+
+            var current = ContentFingerprint.Compute(envelope.SourcePath, envelope.Enumeration);
+            if (current is null || !string.Equals(current, envelope.ContentFingerprint, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine(
+                    $"[koshi] Discarding index snapshot for '{envelope.SourcePath}': " +
+                    $"content fingerprint changed since {envelope.SavedAt:u}.");
+                return;
+            }
+        }
+
+        var retriever = new KeywordRetriever();
+        retriever.Index(envelope.Chunks);
+
+        lock (_lock)
+        {
+            _indexedChunks = envelope.Chunks;
+            _keywordRetriever = retriever;
+            _indexedFromPath = envelope.SourcePath;
+            _indexedEnumeration = envelope.Enumeration;
+            _isIndexed = true;
+            _autoIndexAttempted = true; // Snapshot satisfied the need; skip env-var auto-index.
+            _loadedFromSnapshot = true;
+        }
+
+        Console.Error.WriteLine(
+            $"[koshi] Loaded index snapshot: {envelope.Chunks.Count} chunks from " +
+            $"'{envelope.SourcePath ?? "(unknown)"}' (saved {envelope.SavedAt:u}).");
+    }
+
+    private static void ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration)
     {
         var retriever = new KeywordRetriever();
         retriever.Index(chunks);
+
+        var fingerprint = ContentFingerprint.Compute(source, enumeration);
 
         lock (_lock)
         {
             _indexedChunks = chunks;
             _keywordRetriever = retriever;
             _indexedFromPath = source;
+            _indexedEnumeration = enumeration;
             _isIndexed = true;
             _autoIndexAttempted = true;
+            _snapshotLoadAttempted = true;
+            _loadedFromSnapshot = false;
         }
+
+        _persistence.Save(source, fingerprint, enumeration, chunks);
     }
 
     private static string? ResolveIndexPath(string? explicitPath)

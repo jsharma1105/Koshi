@@ -194,6 +194,64 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or S
     preSeededMemoryFile = null;
 }
 
+// Pre-seed an IndexEnvelope (schema v1) at KOSHI_INDEX_FILE so we can verify
+// (a) the v0.5.0 index file format round-trips through the source-gen
+// JsonSerializerContext and (b) koshi_search auto-loads on first call without
+// requiring koshi_index_directory. The fixture uses an in-memory sentinel
+// source so no fingerprint validation runs at load time. The distinctive
+// token "zorblax_quux_xenoplasma" lets us assert that the seeded chunk
+// content is actually returned by search.
+const string IndexFixtureJson = """
+{
+  "SchemaVersion": 1,
+  "SavedAt": "2026-05-18T10:00:00+00:00",
+  "SourcePath": "in-memory",
+  "Chunks": [
+    {
+      "Id": "fixture:chunk-0",
+      "Content": "Persistence fixture: zorblax_quux_xenoplasma should be retrievable on first koshi_search without any indexing call.",
+      "Metadata": {
+        "Source": "fixture-persistence.md",
+        "DocumentType": "documentation",
+        "StartOffset": 0,
+        "EndOffset": 1,
+        "IngestedAt": "2026-05-18T10:00:00+00:00"
+      },
+      "TokenCount": 24
+    },
+    {
+      "Id": "fixture:chunk-1",
+      "Content": "Second fixture chunk. Distinguishing keyword: zorblax_quux_xenoplasma. Used by the smoke test to exercise BM25 ranking over a 2-chunk corpus.",
+      "Metadata": {
+        "Source": "fixture-persistence.md",
+        "DocumentType": "documentation",
+        "StartOffset": 1,
+        "EndOffset": 2,
+        "IngestedAt": "2026-05-18T10:00:00+00:00"
+      },
+      "TokenCount": 28
+    }
+  ]
+}
+""";
+
+string? preSeededIndexFile = null;
+string? preSeededIndexDir = null;
+try
+{
+    preSeededIndexDir = Path.Join(Path.GetTempPath(), $"koshi-smoke-index-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(preSeededIndexDir);
+    preSeededIndexFile = Path.Join(preSeededIndexDir, "index.json");
+    File.WriteAllText(preSeededIndexFile, IndexFixtureJson);
+    psi.Environment["KOSHI_INDEX_FILE"] = preSeededIndexFile;
+    Console.Error.WriteLine($"[setup] Pre-seeded index fixture at: {preSeededIndexFile}");
+}
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+{
+    Console.Error.WriteLine($"[setup] WARN: failed to seed index fixture: {ex.Message}");
+    preSeededIndexFile = null;
+}
+
 Console.Error.WriteLine($"=== Launching: {psi.FileName} {psi.Arguments} ===");
 var proc = Process.Start(psi)!;
 
@@ -426,6 +484,40 @@ if (preSeededMemoryFile is not null)
     }
 }
 
+// ─── Phase 3.6: index file persistence (KOSHI_INDEX_FILE) ──────────────
+// Verifies the v0.5.0 index-persistence feature: a snapshot pre-written to
+// disk before the server launched is auto-loaded on the first retrieval
+// call. If the source-gen IndexEnvelope shape drifts or EnsureCorpusLoaded
+// is bypassed, the distinctive token will not surface and the smoke fails.
+if (preSeededIndexFile is not null)
+{
+    var idxResp = await RpcAsync("tools/call", new
+    {
+        name = "koshi_search",
+        arguments = new { query = "zorblax_quux_xenoplasma", topK = 3 }
+    });
+    if (idxResp is null)
+    {
+        failures.Add("index-persist: search TIMEOUT");
+    }
+    else
+    {
+        var text = ExtractFirstText(idxResp.Value);
+        if (text is null)
+        {
+            failures.Add("index-persist: search returned no text");
+        }
+        else if (!text.Contains("zorblax_quux_xenoplasma", StringComparison.Ordinal))
+        {
+            failures.Add($"index-persist: pre-seeded chunk NOT loaded from KOSHI_INDEX_FILE. Search response: {text[..Math.Min(240, text.Length)]}");
+        }
+        else
+        {
+            Console.Error.WriteLine("[ok] index-persist: snapshot auto-loaded from KOSHI_INDEX_FILE on first search");
+        }
+    }
+}
+
 // ─── Phase 4: each of the 20 tools ──────────────────────────────────────
 // Retrieval (5)
 await ExpectSuccessAsync("koshi_index", "koshi_index", new
@@ -434,9 +526,48 @@ await ExpectSuccessAsync("koshi_index", "koshi_index", new
 });
 var indexPath = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src"));
 await ExpectSuccessAsync("koshi_index_directory", "koshi_index_directory", new { path = indexPath, pattern = "*.cs" });
+
+// Save-side: koshi_index_directory should have rewritten the snapshot to
+// disk (overwriting the fixture). Verify the file exists, is non-empty,
+// and no longer contains the fixture's distinctive token.
+if (preSeededIndexFile is not null)
+{
+    if (!File.Exists(preSeededIndexFile))
+    {
+        failures.Add("index-persist: snapshot file missing after koshi_index_directory");
+    }
+    else
+    {
+        var snapshotJson = File.ReadAllText(preSeededIndexFile);
+        if (snapshotJson.Length < 100)
+        {
+            failures.Add($"index-persist: snapshot suspiciously small ({snapshotJson.Length} bytes)");
+        }
+        else if (snapshotJson.Contains("zorblax_quux_xenoplasma", StringComparison.Ordinal))
+        {
+            failures.Add("index-persist: snapshot still contains fixture token — koshi_index_directory did not overwrite");
+        }
+        else
+        {
+            Console.Error.WriteLine($"[ok] index-persist: snapshot rewritten by koshi_index_directory ({snapshotJson.Length:N0} bytes)");
+        }
+    }
+}
+
 await ExpectSuccessAsync("koshi_search", "koshi_search", new { query = "alpha bravo", topK = 2 });
 await ExpectSuccessAsync("koshi_list_indexed", "koshi_list_indexed", new { });
 await ExpectSuccessAsync("koshi_clear_index", "koshi_clear_index", new { });
+
+// Delete-side: koshi_clear_index must remove the on-disk snapshot too,
+// otherwise the next process start would re-load a stale corpus.
+if (preSeededIndexFile is not null && File.Exists(preSeededIndexFile))
+{
+    failures.Add("index-persist: snapshot file still exists after koshi_clear_index");
+}
+else if (preSeededIndexFile is not null)
+{
+    Console.Error.WriteLine("[ok] index-persist: snapshot deleted by koshi_clear_index");
+}
 
 // Memory (5)
 await ExpectSuccessAsync("koshi_remember", "koshi_remember", new
@@ -494,6 +625,16 @@ if (preSeededMemoryDir is not null)
     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
     {
         Console.Error.WriteLine($"[cleanup] WARN: could not remove {preSeededMemoryDir}: {ex.Message}");
+    }
+}
+
+// Best-effort cleanup of the pre-seeded index fixture directory.
+if (preSeededIndexDir is not null)
+{
+    try { Directory.Delete(preSeededIndexDir, recursive: true); }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+    {
+        Console.Error.WriteLine($"[cleanup] WARN: could not remove {preSeededIndexDir}: {ex.Message}");
     }
 }
 
