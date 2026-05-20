@@ -345,4 +345,7 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: python -m twine upload python/dist/*
+        # --skip-existing makes re-runs (e.g. after a tag retag) idempotent;
+        # PyPI returns 400 on duplicate version uploads otherwise.
+        # Mirrors the `--skip-duplicate` flag already used for the NuGet push.
+        run: python -m twine upload --skip-existing python/dist/*
