@@ -64,7 +64,7 @@ public class MemoryStoreTests : IDisposable
     [Fact]
     public void WithFreshState_reloads_in_vault_mode_after_external_add()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var store = new MemoryStore(be);
 
         Assert.Equal(0, store.WithFreshState(m => m.Count));
@@ -96,7 +96,7 @@ public class MemoryStoreTests : IDisposable
     [Fact]
     public void Vault_AllocateId_avoids_collision_with_externally_added_id()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var store = new MemoryStore(be);
 
         // External agent drops a memory at mem-000777.
@@ -128,7 +128,7 @@ public class MemoryStoreTests : IDisposable
     public void Vault_external_deletion_does_not_resurrect_memory()
     {
         // Regression guard: in v0.5.x, the static _memories cache would re-save deleted files.
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var store = new MemoryStore(be);
 
         store.WithFreshState(memories =>

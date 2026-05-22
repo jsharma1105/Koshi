@@ -41,7 +41,7 @@ public class JsonFileBackendTests : IDisposable
         var be = new JsonFileBackend(_file);
         Assert.True(be.IsEnabled);
         Assert.Equal("json", be.BackendKind);
-        Assert.False(be.RequiresReloadPerCall);
+        Assert.False(be.ShouldReload());
         Assert.Equal(_file, be.Location);
     }
 

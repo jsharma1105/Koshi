@@ -813,6 +813,11 @@ try
     vpsi.StandardInputEncoding = Encoding.UTF8;
     vpsi.StandardOutputEncoding = Encoding.UTF8;
     vpsi.Environment["KOSHI_MEMORY_VAULT"] = vaultDir;
+    // Disable the file-system watcher in the smoke test — Phase 2 (v0.6.1) added
+    // a watcher that defaults on, but the smoke writes/deletes files and immediately
+    // calls recall. The "reload-on-every-call" fallback is what we want here for
+    // deterministic timing; the watcher path is covered by VaultWatcherTests.
+    vpsi.Environment["KOSHI_VAULT_WATCH"] = "off";
     // Make sure leftover env vars from this process don't bleed in.
     vpsi.Environment.Remove("KOSHI_MEMORY_FILE");
     vpsi.Environment.Remove("KOSHI_INDEX_FILE");

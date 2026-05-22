@@ -5,8 +5,8 @@ namespace Koshi.Mcp.Internal;
 
 /// <summary>
 /// Owns the in-memory memory cache, the lock, and ID allocation. Dispatches mutations
-/// to the configured <see cref="IMemoryBackend"/>. Refreshes from disk on every
-/// tool-call entry when the backend reports <see cref="IMemoryBackend.RequiresReloadPerCall"/>.
+/// to the configured <see cref="IMemoryBackend"/>. Refreshes from disk on tool-call
+/// entry when the backend reports <see cref="IMemoryBackend.ShouldReload"/>.
 /// </summary>
 internal sealed class MemoryStore
 {
@@ -26,14 +26,15 @@ internal sealed class MemoryStore
 
     /// <summary>
     /// Run <paramref name="action"/> under the store's lock with a fresh <c>_memories</c> list.
-    /// In vault mode, <see cref="IMemoryBackend.LoadAll"/> is called first and
-    /// <c>_nextId</c> is refreshed; in JSON mode, the cache is used as-is.
+    /// In vault mode, <see cref="IMemoryBackend.LoadAll"/> is called first (gated by
+    /// <see cref="IMemoryBackend.ShouldReload"/>) and <c>_nextId</c> is refreshed; in JSON
+    /// mode, the cache is used as-is.
     /// </summary>
     public T WithFreshState<T>(Func<List<MemoryRecord>, T> action)
     {
         lock (_lock)
         {
-            if (_backend.RequiresReloadPerCall)
+            if (_backend.ShouldReload())
             {
                 _memories = _backend.LoadAll();
                 RecomputeNextId();
