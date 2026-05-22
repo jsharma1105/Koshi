@@ -250,7 +250,7 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 | `koshi_token_count` | Count GPT-4 (cl100k) tokens for any text. |
 | `koshi_budget_plan` | Plan a token budget allocation across roles and show cache-prefix savings. |
 
-### 🧠 Memory (8)
+### 🧠 Memory (9)
 
 | Tool | Purpose |
 |------|---------|
@@ -262,6 +262,7 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 | `koshi_memory_export_to_vault` | Bulk-export the current memory store to a Markdown vault directory. See [Vault Mode](../../docs/vault-mode.md). |
 | `koshi_memory_import_from_vault` | Import memories from a Markdown vault. Modes: `merge` / `overlay` / `replace`. |
 | `koshi_memory_sync_vault` | Force a fresh re-scan of the active vault (no-op for the JSON backend). |
+| `koshi_capture_turn` | **Turn-end auto-capture for decisions** (v0.8.0). Pass a 1-3 paragraph turn summary plus optional `linked_pr` / `linked_commits`; the server runs a pattern-based extractor (no LLM) to pull out decision-shape sentences and persists each as a `Decision` memory with provenance. Set `auto_promote=false` to preview candidates without saving. Paste [`docs/copilot-instructions-snippet.md`](../../docs/copilot-instructions-snippet.md) into your repo's `.github/copilot-instructions.md` so the agent calls this reliably. |
 
 ### 👥 Team & Quality (5)
 
