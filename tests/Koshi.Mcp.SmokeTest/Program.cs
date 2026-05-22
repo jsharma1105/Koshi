@@ -416,7 +416,7 @@ var initResp = await RpcAsync("initialize", new
 if (initResp is null) { Console.Error.WriteLine("FAIL: no response to initialize"); KillAndExit(2); }
 await SendNotificationAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
 
-// ─── Phase 2: tools/list — must enumerate all 20 tools ───────────────────
+// ─── Phase 2: tools/list — must enumerate all 23 tools ───────────────────
 var listResp = await RpcAsync("tools/list");
 if (listResp is null) { failures.Add("tools/list: TIMEOUT"); }
 else
@@ -437,6 +437,7 @@ else
     string[] expected = [
         "koshi_index", "koshi_index_directory", "koshi_search", "koshi_list_indexed", "koshi_clear_index",
         "koshi_remember", "koshi_recall", "koshi_memory_stats", "koshi_forget", "koshi_clear_memories",
+        "koshi_memory_export_to_vault", "koshi_memory_import_from_vault", "koshi_memory_sync_vault",
         "koshi_compile_context", "koshi_token_count", "koshi_budget_plan",
         "koshi_register_team", "koshi_score_turn", "koshi_team_dashboard", "koshi_analyze_feedback", "koshi_list_teams",
         "koshi_version", "koshi_health",
@@ -638,7 +639,7 @@ if (preSeededIndexFile is not null)
     }
 }
 
-// ─── Phase 4: each of the 20 tools ──────────────────────────────────────
+// ─── Phase 4: each of the 23 tools ──────────────────────────────────────
 // Retrieval (5)
 await ExpectSuccessAsync("koshi_index", "koshi_index", new
 {
@@ -732,7 +733,7 @@ else if (preSeededIndexFile is not null)
     }
 }
 
-// Memory (5)
+// Memory (8)
 await ExpectSuccessAsync("koshi_remember", "koshi_remember", new
 {
     content = "Smoke test stores this fact",
@@ -743,6 +744,21 @@ await ExpectSuccessAsync("koshi_recall", "koshi_recall", new { query = "smoke", 
 await ExpectSuccessAsync("koshi_memory_stats", "koshi_memory_stats", new { });
 await ExpectSuccessAsync("koshi_forget", "koshi_forget", new { subject = "smoke" });
 await ExpectSuccessAsync("koshi_clear_memories", "koshi_clear_memories", new { confirm = true });
+
+// v0.6.0 vault tools — sanity check that they're exposed and return a sensible response in JSON mode.
+await ExpectSuccessAsync("koshi_memory_sync_vault", "koshi_memory_sync_vault", new { });
+{
+    var vaultProbeDir = Path.Join(Path.GetTempPath(), $"koshi-smoke-vault-probe-{Guid.NewGuid():N}");
+    try
+    {
+        await ExpectSuccessAsync("koshi_memory_export_to_vault", "koshi_memory_export_to_vault", new { vaultPath = vaultProbeDir });
+        await ExpectSuccessAsync("koshi_memory_import_from_vault", "koshi_memory_import_from_vault", new { vaultPath = vaultProbeDir, mode = "merge" });
+    }
+    finally
+    {
+        try { if (Directory.Exists(vaultProbeDir)) Directory.Delete(vaultProbeDir, recursive: true); } catch { }
+    }
+}
 
 // Context (3) — koshi_token_count is the tokenizer canary for AOT trimming.
 await ExpectSuccessAsync("koshi_token_count", "koshi_token_count", new { text = "hello world how are you today" });
@@ -775,6 +791,191 @@ await ExpectSuccessAsync("koshi_health", "koshi_health", new { });
 await ExpectToolErrorAsync("bad: search empty query", "koshi_search", new { query = "", topK = 5 });
 await ExpectToolErrorAsync("bad: forget empty subject", "koshi_forget", new { subject = "" });
 await ExpectToolErrorAsync("bad: index invalid JSON", "koshi_index", new { documents = "this is not json" });
+
+// ─── Phase 6: KOSHI_MEMORY_VAULT end-to-end ────────────────────────────
+// Spawns a SECOND server process with KOSHI_MEMORY_VAULT set. Verifies
+// vault-mode (v0.6.0) memory behavior end-to-end: file layout, external
+// edits/deletes/adds picked up without restart, unmanaged-note reporting.
+string? vaultDir = null;
+try
+{
+    vaultDir = Path.Join(Path.GetTempPath(), $"koshi-smoke-vault-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(vaultDir);
+    Console.Error.WriteLine($"[setup] Vault smoke dir: {vaultDir}");
+
+    var vpsi = exePath is not null
+        ? new ProcessStartInfo(exePath)
+        : new ProcessStartInfo("dotnet", $"\"{dllPath}\"");
+    vpsi.RedirectStandardInput = true;
+    vpsi.RedirectStandardOutput = true;
+    vpsi.RedirectStandardError = true;
+    vpsi.UseShellExecute = false;
+    vpsi.StandardInputEncoding = Encoding.UTF8;
+    vpsi.StandardOutputEncoding = Encoding.UTF8;
+    vpsi.Environment["KOSHI_MEMORY_VAULT"] = vaultDir;
+    // Make sure leftover env vars from this process don't bleed in.
+    vpsi.Environment.Remove("KOSHI_MEMORY_FILE");
+    vpsi.Environment.Remove("KOSHI_INDEX_FILE");
+    vpsi.Environment.Remove("KOSHI_INDEX_PATH");
+
+    var vproc = Process.Start(vpsi)!;
+    var vresponses = new Dictionary<int, JsonElement>();
+    using var vsignal = new SemaphoreSlim(0);
+    int vnextId = 1;
+
+    _ = Task.Run(async () =>
+    {
+        string? line;
+        while ((line = await vproc.StandardError.ReadLineAsync()) is not null)
+            Console.Error.WriteLine($"[vault-stderr] {line}");
+    });
+    _ = Task.Run(async () =>
+    {
+        string? line;
+        while ((line = await vproc.StandardOutput.ReadLineAsync()) is not null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement.Clone();
+                if (root.TryGetProperty("id", out var idElem) && idElem.ValueKind == JsonValueKind.Number)
+                {
+                    vresponses[idElem.GetInt32()] = root;
+                    vsignal.Release();
+                }
+            }
+            catch (JsonException) { Console.Error.WriteLine($"[vault non-json] {line}"); }
+        }
+    });
+
+    async Task<JsonElement?> VRpcAsync(string method, object? @params = null, int timeoutMs = 8000)
+    {
+        int id = vnextId++;
+        var payload = @params is null
+            ? $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}"}"""
+            : $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}","params":{{JsonSerializer.Serialize(@params)}}}""";
+        await vproc.StandardInput.WriteLineAsync(payload);
+        await vproc.StandardInput.FlushAsync();
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (vresponses.TryGetValue(id, out var r)) return r;
+            await Task.Delay(50);
+        }
+        return null;
+    }
+
+    async Task<string?> VToolAsync(string tool, object args)
+    {
+        var resp = await VRpcAsync("tools/call", new { name = tool, arguments = args });
+        return resp is null ? null : ExtractFirstText(resp.Value);
+    }
+
+    // Handshake.
+    var vinitResp = await VRpcAsync("initialize", new
+    {
+        protocolVersion = "2024-11-05",
+        capabilities = new { },
+        clientInfo = new { name = "smoke-vault", version = "0.1" }
+    });
+    if (vinitResp is null) failures.Add("vault: initialize TIMEOUT");
+    await vproc.StandardInput.WriteLineAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
+    await vproc.StandardInput.FlushAsync();
+
+    // Save three memories of three types — files should land under koshi/<type>/.
+    await VToolAsync("koshi_remember", new { content = "Fact body alpha-token-VLT.", subject = "vault fact one", type = "Fact" });
+    await VToolAsync("koshi_remember", new { content = "Decision body beta-token-VLT.", subject = "vault decision one", type = "Decision" });
+    await VToolAsync("koshi_remember", new { content = "Pattern body gamma-token-VLT.", subject = "vault pattern one", type = "Pattern" });
+
+    // Assert file layout.
+    var koshiRoot = Path.Combine(vaultDir, "koshi");
+    foreach (var sub in new[] { "facts", "decisions", "patterns" })
+    {
+        var dir = Path.Combine(koshiRoot, sub);
+        if (!Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*.md").Any())
+        {
+            failures.Add($"vault: expected at least one .md under {dir}");
+        }
+    }
+
+    // Stats should report backend == vault.
+    var statsText = await VToolAsync("koshi_memory_stats", new { });
+    if (statsText is null || !statsText.Contains("vault", StringComparison.OrdinalIgnoreCase))
+        failures.Add($"vault: memory_stats did not mention backend 'vault'. Got: {(statsText ?? "(null)")[..Math.Min(240, (statsText ?? "").Length)]}");
+
+    // Drop an externally-created managed memory + an unmanaged note WHILE the proc is running.
+    // The body marker (phantomzqx99201) is a single-token, non-hyphenated string that does NOT
+    // appear in the query — so we can detect actual body presence vs. recall's query-echo
+    // response ("No memories found matching '<query>'.").
+    var externalMemPath = Path.Combine(koshiRoot, "facts", "external-fact--mem-999001.md");
+    File.WriteAllText(externalMemPath, """
+---
+koshi:
+  id: mem-999001
+  type: Fact
+  scope:
+    user: "*"
+    workspace: default
+    thread: null
+  source: external
+  confidence: 0.9
+  created-at: 2026-05-22T10:00:00Z
+  last-accessed-at: 2026-05-22T10:00:00Z
+  access-count: 0
+  tier: Hot
+---
+# External vault assertion fact
+
+External vault assertion body. Marker phantomzqx99201 for vault smoke test.
+""");
+    var unmanagedPath = Path.Combine(koshiRoot, "facts", "my-personal-note.md");
+    File.WriteAllText(unmanagedPath, "# A personal note\n\nNot managed by Koshi.\n");
+
+    // Recall should now see the external file (vault reloads per call).
+    // Query terms appear in the body but NOT in the unique marker.
+    var recallText = await VToolAsync("koshi_recall", new { query = "external vault assertion", type = "All", topK = 5 });
+    if (recallText is null || !recallText.Contains("phantomzqx99201", StringComparison.Ordinal))
+        failures.Add($"vault: external file not picked up by recall. Got: {(recallText ?? "(null)")[..Math.Min(240, (recallText ?? "").Length)]}");
+
+    // Stats should now report at least one unmanaged note.
+    var stats2 = await VToolAsync("koshi_memory_stats", new { });
+    if (stats2 is null || !stats2.Contains("unmanaged", StringComparison.OrdinalIgnoreCase))
+        failures.Add($"vault: memory_stats did not surface unmanaged-note count. Got: {(stats2 ?? "(null)")[..Math.Min(240, (stats2 ?? "").Length)]}");
+
+    // External delete — recall must NOT bring it back. The marker is distinct from
+    // the query so it won't be echoed in the "No memories found matching '<query>'" response.
+    File.Delete(externalMemPath);
+    var recall2 = await VToolAsync("koshi_recall", new { query = "external vault assertion", type = "All", topK = 5 });
+    if (recall2 is not null && recall2.Contains("phantomzqx99201", StringComparison.Ordinal))
+        failures.Add("vault: cache-divergence regression — deleted external file still returned by recall");
+
+    // Subject rename via Remember reusing the same subject keyword — exactly one file should exist per type.
+    var factDir = Path.Combine(koshiRoot, "facts");
+    var factCountBefore = Directory.EnumerateFiles(factDir, "*.md").Count();
+    if (factCountBefore == 0)
+        failures.Add("vault: no fact files found after Phase 6 mutations");
+
+    // Shutdown vault proc.
+    vproc.StandardInput.Close();
+    vproc.WaitForExit(5000);
+    if (!vproc.HasExited) vproc.Kill();
+    Console.Error.WriteLine("[ok] vault smoke phase complete");
+}
+catch (Exception ex)
+{
+    failures.Add($"vault smoke: unexpected exception: {ex.GetType().Name}: {ex.Message}");
+}
+finally
+{
+    if (vaultDir is not null)
+    {
+        try { Directory.Delete(vaultDir, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Console.Error.WriteLine($"[cleanup] WARN: could not remove vault dir {vaultDir}: {ex.Message}");
+        }
+    }
+}
 
 // ─── Shutdown ───────────────────────────────────────────────────────────
 proc.StandardInput.Close();

@@ -49,15 +49,22 @@ public sealed class DiagnosticTools
         sb.AppendLine();
 
         sb.AppendLine("  Memory:");
-        sb.AppendLine($"    Records:     {memStatus.count}");
-        sb.AppendLine($"    Persistence: {(memStatus.persistenceEnabled ? "enabled" : "disabled")}");
-        sb.AppendLine($"    File:        {memStatus.path ?? "(in-memory only)"}");
+        sb.AppendLine($"    Records:     {memStatus.Count}");
+        sb.AppendLine($"    Backend:     {memStatus.BackendKind}");
+        sb.AppendLine($"    Persistence: {(memStatus.PersistenceEnabled ? "enabled" : "disabled")}");
+        sb.AppendLine($"    Location:    {memStatus.Path ?? "(in-memory only)"}");
+        if (memStatus.BackendKind == "vault")
+        {
+            sb.AppendLine($"    Unmanaged:   {memStatus.UnmanagedNoteCount}");
+            sb.AppendLine($"    Dup-id warn: {memStatus.DuplicateIdWarningCount}");
+        }
         sb.AppendLine();
 
         sb.AppendLine("  Configuration (env vars):");
         sb.AppendLine($"    KOSHI_INDEX_PATH:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH") ?? "(unset)"}");
         sb.AppendLine($"    KOSHI_INDEX_FILE:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE") ?? "(unset)"}");
         sb.AppendLine($"    KOSHI_MEMORY_FILE:  {Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE") ?? "(unset)"}");
+        sb.AppendLine($"    KOSHI_MEMORY_VAULT: {Environment.GetEnvironmentVariable("KOSHI_MEMORY_VAULT") ?? "(unset)"}");
         sb.AppendLine();
 
         var uptime = DateTimeOffset.UtcNow - _startedAt;

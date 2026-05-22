@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Koshi.Core\Koshi.Core.csproj" />
+    <ProjectReference Include="..\..\src\Koshi.Mcp\Koshi.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

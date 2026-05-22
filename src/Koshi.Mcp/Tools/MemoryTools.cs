@@ -9,7 +9,10 @@ namespace Koshi.Mcp.Tools;
 
 /// <summary>
 /// MCP tools for memory management — store, recall, and manage facts.
-/// Memories live in-process by default; set KOSHI_MEMORY_FILE to persist to disk as JSON.
+/// Memories live in-process by default. Set <c>KOSHI_MEMORY_FILE</c> to persist as a single
+/// JSON envelope, or <c>KOSHI_MEMORY_VAULT</c> to persist as one Markdown file per memory
+/// under <c>&lt;vault&gt;/koshi/{facts,decisions,patterns,preferences}/</c> for Git-friendly
+/// team sharing.
 /// </summary>
 [McpServerToolType]
 public sealed class MemoryTools
@@ -17,24 +20,31 @@ public sealed class MemoryTools
     private const int MaxMemories = 1_000;
     private const int MaxRecallTopK = 25;
 
-    private static readonly Lock _lock = new();
-    private static readonly List<MemoryRecord> _memories;
-    private static int _nextId;
-    private static readonly MemoryPersistence _persistence;
+    private static readonly MemoryStore _store;
 
     static MemoryTools()
     {
-        _persistence = new MemoryPersistence(Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE"));
-        _memories = _persistence.LoadOrEmpty();
-        _nextId = _memories
-            .Select(m => int.TryParse(m.Id.AsSpan(m.Id.LastIndexOf('-') + 1), out var n) ? n : 0)
-            .DefaultIfEmpty(0)
-            .Max();
+        var vaultPath = Environment.GetEnvironmentVariable("KOSHI_MEMORY_VAULT");
+        var filePath = Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE");
+
+        IMemoryBackend backend;
+        if (!string.IsNullOrWhiteSpace(vaultPath))
+        {
+            if (!string.IsNullOrWhiteSpace(filePath))
+                Console.Error.WriteLine(
+                    "[koshi] Both KOSHI_MEMORY_VAULT and KOSHI_MEMORY_FILE are set; vault takes precedence.");
+            backend = new VaultBackend(vaultPath);
+        }
+        else
+        {
+            backend = new JsonFileBackend(filePath);
+        }
+        _store = new MemoryStore(backend);
     }
 
     [McpServerTool(Name = "koshi_remember"), Description(
         "Store a fact, decision, pattern, or preference in memory. " +
-        "Memories persist for the session, and across restarts when KOSHI_MEMORY_FILE is set. " +
+        "Memories persist for the session, and across restarts when KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT is set. " +
         "Scope (userId/workspaceId/threadId) controls who can recall the memory. " +
         "Leave userId unset (or pass '*') to make the memory globally visible.")]
     public static string Remember(
@@ -64,31 +74,32 @@ public sealed class MemoryTools
             WorkspaceId: string.IsNullOrWhiteSpace(workspaceId) ? "default" : workspaceId.Trim(),
             ThreadId: string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim());
 
-        var record = new MemoryRecord
+        return _store.WithFreshState(memories =>
         {
-            Id = $"mem-{Interlocked.Increment(ref _nextId):D6}",
-            Type = memType,
-            Content = content,
-            Subject = subject,
-            Scope = scope,
-            Source = source,
-            Confidence = confidence,
-        };
-
-        lock (_lock)
-        {
-            if (_memories.Count >= MaxMemories)
+            if (memories.Count >= MaxMemories)
                 return $"❌ Memory limit reached ({MaxMemories}). Use koshi_forget to free space.";
-            _memories.Add(record);
-            _persistence.Save(_memories);
-        }
 
-        var preview = content.Length > 80 ? content[..80] + "..." : content;
-        var scopeLabel = scope.UserId == "*"
-            ? $"workspace='{scope.WorkspaceId}'"
-            : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
-        if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
-        return $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+            var record = new MemoryRecord
+            {
+                Id = _store.AllocateId(),
+                Type = memType,
+                Content = content,
+                Subject = subject,
+                Scope = scope,
+                Source = source,
+                Confidence = confidence,
+            };
+
+            memories.Add(record);
+            _store.Upsert(record);
+
+            var preview = content.Length > 80 ? content[..80] + "..." : content;
+            var scopeLabel = scope.UserId == "*"
+                ? $"workspace='{scope.WorkspaceId}'"
+                : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
+            if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
+            return $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+        });
     }
 
     [McpServerTool(Name = "koshi_recall"), Description(
@@ -112,72 +123,74 @@ public sealed class MemoryTools
 
         topK = Math.Clamp(topK < 1 ? 5 : topK, 1, MaxRecallTopK);
 
-        List<MemoryRecord> candidates;
-        lock (_lock) { candidates = [.. _memories]; }
-
-        if (candidates.Count == 0)
-            return "No memories stored yet. Use koshi_remember to store facts.";
-
-        if (!string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)
-            && Enum.TryParse<MemoryType>(type, true, out var mt))
+        return _store.WithFreshState(memories =>
         {
-            candidates = candidates.Where(m => m.Type == mt).ToList();
-        }
+            List<MemoryRecord> candidates = [.. memories];
 
-        var hasScopeFilter = !string.IsNullOrWhiteSpace(userId)
-                          || !string.IsNullOrWhiteSpace(workspaceId)
-                          || !string.IsNullOrWhiteSpace(threadId);
-        if (hasScopeFilter)
-        {
-            candidates = candidates.Where(m => MatchesScope(m.Scope, userId, workspaceId, threadId)).ToList();
-        }
+            if (candidates.Count == 0)
+                return "No memories stored yet. Use koshi_remember to store facts.";
 
-        if (candidates.Count == 0)
-            return hasScopeFilter
-                ? $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}')."
-                : $"No memories of type '{type}'.";
-
-        var bm25Scores = ComputeBm25Scores(query, candidates);
-        double maxBm25 = bm25Scores.Count > 0 ? bm25Scores.Values.Max() : 0.0;
-        var bm25Denominator = maxBm25 > 0 ? maxBm25 : 1.0;
-
-        var now = DateTimeOffset.UtcNow;
-        var scored = candidates
-            .Select(m =>
+            if (!string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)
+                && Enum.TryParse<MemoryType>(type, true, out var mt))
             {
-                var rawBm25 = bm25Scores.GetValueOrDefault(m.Id, 0.0);
-                var normalizedBm25 = (float)(rawBm25 / bm25Denominator);
-                var recencyBonus = (float)Math.Exp(-(now - m.CreatedAt).TotalHours / 24.0);
-                // Per #24 acceptance criteria: 0.6·BM25 + 0.3·recency + 0.1·confidence.
-                var combined = 0.6f * normalizedBm25 + 0.3f * recencyBonus + 0.1f * m.Confidence;
-                return (Memory: m, Score: combined, Bm25: normalizedBm25);
-            })
-            // Require some textual relevance — pure recency/confidence shouldn't surface unrelated memories.
-            .Where(x => x.Bm25 > 0)
-            .OrderByDescending(x => x.Score)
-            .Take(topK)
-            .ToList();
+                candidates = candidates.Where(m => m.Type == mt).ToList();
+            }
 
-        if (scored.Count == 0)
-            return $"No memories found matching '{query}'.";
+            var hasScopeFilter = !string.IsNullOrWhiteSpace(userId)
+                              || !string.IsNullOrWhiteSpace(workspaceId)
+                              || !string.IsNullOrWhiteSpace(threadId);
+            if (hasScopeFilter)
+            {
+                candidates = candidates.Where(m => MatchesScope(m.Scope, userId, workspaceId, threadId)).ToList();
+            }
 
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"═══ Recalled {scored.Count} memories for: \"{query}\" ═══\n");
+            if (candidates.Count == 0)
+                return hasScopeFilter
+                    ? $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}')."
+                    : $"No memories of type '{type}'.";
 
-        foreach (var (mem, score, _) in scored)
-        {
-            var scopeLabel = mem.Scope.UserId == "*"
-                ? $"workspace='{mem.Scope.WorkspaceId}'"
-                : $"user='{mem.Scope.UserId}', workspace='{mem.Scope.WorkspaceId}'";
-            if (mem.Scope.ThreadId is not null) scopeLabel += $", thread='{mem.Scope.ThreadId}'";
+            var bm25Scores = ComputeBm25Scores(query, candidates);
+            double maxBm25 = bm25Scores.Count > 0 ? bm25Scores.Values.Max() : 0.0;
+            var bm25Denominator = maxBm25 > 0 ? maxBm25 : 1.0;
 
-            sb.AppendLine($"  [{mem.Type}] {mem.Subject} (score: {score:F2}, confidence: {mem.Confidence:P0})");
-            sb.AppendLine($"    {mem.Content}");
-            sb.AppendLine($"    Scope: {scopeLabel} | Source: {mem.Source} | Stored: {mem.CreatedAt:g}");
-            sb.AppendLine();
-        }
+            var now = DateTimeOffset.UtcNow;
+            var scored = candidates
+                .Select(m =>
+                {
+                    var rawBm25 = bm25Scores.GetValueOrDefault(m.Id, 0.0);
+                    var normalizedBm25 = (float)(rawBm25 / bm25Denominator);
+                    var recencyBonus = (float)Math.Exp(-(now - m.CreatedAt).TotalHours / 24.0);
+                    // Per #24 acceptance criteria: 0.6·BM25 + 0.3·recency + 0.1·confidence.
+                    var combined = 0.6f * normalizedBm25 + 0.3f * recencyBonus + 0.1f * m.Confidence;
+                    return (Memory: m, Score: combined, Bm25: normalizedBm25);
+                })
+                // Require some textual relevance — pure recency/confidence shouldn't surface unrelated memories.
+                .Where(x => x.Bm25 > 0)
+                .OrderByDescending(x => x.Score)
+                .Take(topK)
+                .ToList();
 
-        return sb.ToString();
+            if (scored.Count == 0)
+                return $"No memories found matching '{query}'.";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"═══ Recalled {scored.Count} memories for: \"{query}\" ═══\n");
+
+            foreach (var (mem, score, _) in scored)
+            {
+                var scopeLabel = mem.Scope.UserId == "*"
+                    ? $"workspace='{mem.Scope.WorkspaceId}'"
+                    : $"user='{mem.Scope.UserId}', workspace='{mem.Scope.WorkspaceId}'";
+                if (mem.Scope.ThreadId is not null) scopeLabel += $", thread='{mem.Scope.ThreadId}'";
+
+                sb.AppendLine($"  [{mem.Type}] {mem.Subject} (score: {score:F2}, confidence: {mem.Confidence:P0})");
+                sb.AppendLine($"    {mem.Content}");
+                sb.AppendLine($"    Scope: {scopeLabel} | Source: {mem.Source} | Stored: {mem.CreatedAt:g}");
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        });
     }
 
     /// <summary>
@@ -238,39 +251,55 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_stats"), Description(
-        "Show statistics about stored memories: counts by type, top subjects, average confidence, and persistence status.")]
+        "Show statistics about stored memories: counts by type, top subjects, average confidence, " +
+        "persistence status, and (for vault backends) counts of unmanaged notes and duplicate-id warnings.")]
     public static string MemoryStats()
     {
-        List<MemoryRecord> all;
-        lock (_lock) { all = [.. _memories]; }
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"═══ Memory Stats ({all.Count} of {MaxMemories} max) ═══\n");
-        sb.AppendLine($"  Persistence: {(_persistence.IsEnabled ? $"enabled → {_persistence.Path}" : "disabled (in-memory only)")}");
-        sb.AppendLine();
-
-        if (all.Count == 0)
+        return _store.WithFreshState(all =>
         {
-            sb.AppendLine("  No memories stored yet.");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"═══ Memory Stats ({all.Count} of {MaxMemories} max) ═══\n");
+
+            var backend = _store.Backend;
+            sb.AppendLine($"  Backend:        {backend.BackendKind}");
+            sb.AppendLine($"  Persistence:    {(backend.IsEnabled ? $"enabled → {backend.Location}" : "disabled (in-memory only)")}");
+            if (backend.BackendKind == "vault")
+            {
+                sb.AppendLine($"  Unmanaged notes: {backend.UnmanagedNoteCount}");
+                if (backend.UnmanagedNoteCount > 0)
+                {
+                    foreach (var p in backend.UnmanagedNotePaths.Take(5))
+                        sb.AppendLine($"    - {p}");
+                    if (backend.UnmanagedNotePaths.Count > 5)
+                        sb.AppendLine($"    ... and {backend.UnmanagedNotePaths.Count - 5} more");
+                }
+                sb.AppendLine($"  Duplicate-id warnings: {backend.DuplicateIdWarningCount}");
+            }
+            sb.AppendLine();
+
+            if (all.Count == 0)
+            {
+                sb.AppendLine("  No memories stored yet.");
+                return sb.ToString();
+            }
+
+            var byType = all.GroupBy(m => m.Type).ToDictionary(g => g.Key, g => g.Count());
+            var bySubject = all.GroupBy(m => m.Subject).OrderByDescending(g => g.Count()).Take(5);
+
+            sb.AppendLine("  By type:");
+            foreach (var (t, count) in byType)
+                sb.AppendLine($"    {t}: {count}");
+
+            sb.AppendLine("\n  Top subjects:");
+            foreach (var group in bySubject)
+                sb.AppendLine($"    {group.Key}: {group.Count()} memories");
+
+            sb.AppendLine($"\n  Avg confidence: {all.Average(m => m.Confidence):P0}");
+            sb.AppendLine($"  Oldest: {all.Min(m => m.CreatedAt):g}");
+            sb.AppendLine($"  Newest: {all.Max(m => m.CreatedAt):g}");
+
             return sb.ToString();
-        }
-
-        var byType = all.GroupBy(m => m.Type).ToDictionary(g => g.Key, g => g.Count());
-        var bySubject = all.GroupBy(m => m.Subject).OrderByDescending(g => g.Count()).Take(5);
-
-        sb.AppendLine("  By type:");
-        foreach (var (t, count) in byType)
-            sb.AppendLine($"    {t}: {count}");
-
-        sb.AppendLine("\n  Top subjects:");
-        foreach (var group in bySubject)
-            sb.AppendLine($"    {group.Key}: {group.Count()} memories");
-
-        sb.AppendLine($"\n  Avg confidence: {all.Average(m => m.Confidence):P0}");
-        sb.AppendLine($"  Oldest: {all.Min(m => m.CreatedAt):g}");
-        sb.AppendLine($"  Newest: {all.Max(m => m.CreatedAt):g}");
-
-        return sb.ToString();
+        });
     }
 
     [McpServerTool(Name = "koshi_forget"), Description(
@@ -281,17 +310,19 @@ public sealed class MemoryTools
         if (string.IsNullOrWhiteSpace(subject))
             return "❌ Subject must not be empty.";
 
-        int removed;
-        lock (_lock)
+        return _store.WithFreshState(memories =>
         {
-            removed = _memories.RemoveAll(m =>
-                m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase));
-            if (removed > 0) _persistence.Save(_memories);
-        }
+            var toRemove = memories
+                .Where(m => m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (toRemove.Count == 0)
+                return $"No memories found with subject '{subject}'.";
 
-        return removed > 0
-            ? $"✅ Forgot {removed} memory(ies) about '{subject}'."
-            : $"No memories found with subject '{subject}'.";
+            foreach (var rec in toRemove) memories.Remove(rec);
+            foreach (var rec in toRemove) _store.Delete(rec.Id);
+
+            return $"✅ Forgot {toRemove.Count} memory(ies) about '{subject}'.";
+        });
     }
 
     [McpServerTool(Name = "koshi_clear_memories"), Description(
@@ -303,24 +334,131 @@ public sealed class MemoryTools
         if (!confirm)
             return "⚠️ This will delete ALL memories. Re-call with confirm=true to proceed.";
 
-        int removed;
-        lock (_lock)
+        return _store.WithFreshState(memories =>
         {
-            removed = _memories.Count;
-            _memories.Clear();
-            _persistence.Save(_memories);
-        }
-
-        return removed == 0
-            ? "Memory store already empty."
-            : $"✅ Cleared {removed} memory(ies).";
+            int removed = memories.Count;
+            _store.ReplaceAll([]);
+            return removed == 0
+                ? "Memory store already empty."
+                : $"✅ Cleared {removed} memory(ies).";
+        });
     }
 
-    internal static (int count, bool persistenceEnabled, string? path) GetStatus()
+    [McpServerTool(Name = "koshi_memory_export_to_vault"), Description(
+        "Bulk-export current memories as Obsidian-style Markdown files into <vaultPath>/koshi/. " +
+        "By default refuses to write into a non-empty vault. Pass overwrite=true to replace " +
+        "existing koshi-tagged files in the target vault (user notes without koshi.id are never touched).")]
+    public static string ExportToVault(
+        [Description("Path to the target vault directory")] string vaultPath,
+        [Description("If true, replace existing koshi-tagged files in the vault")] bool overwrite = false)
     {
-        lock (_lock)
+        if (string.IsNullOrWhiteSpace(vaultPath))
+            return "❌ vaultPath must not be empty.";
+
+        VaultBackend target;
+        try { target = new VaultBackend(vaultPath); }
+        catch (Exception ex) { return $"❌ Could not open vault '{vaultPath}': {ex.Message}"; }
+
+        var existing = target.LoadAll();
+        if (existing.Count > 0 && !overwrite)
+            return $"❌ Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
+                   "Pass overwrite=true to replace them.";
+
+        var snapshot = _store.WithFreshState(memories => memories.ToList());
+        target.ReplaceAll(snapshot);
+        return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
+    }
+
+    [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
+        "Import memories from an Obsidian-style vault into the current backend. " +
+        "mode='merge' (default): id collisions keep current memory. " +
+        "mode='overlay': id collisions, vault wins. " +
+        "mode='replace': drop all current memories, take vault as-is.")]
+    public static string ImportFromVault(
+        [Description("Path to the source vault directory")] string vaultPath,
+        [Description("Conflict resolution mode: merge | overlay | replace")] string mode = "merge")
+    {
+        if (string.IsNullOrWhiteSpace(vaultPath))
+            return "❌ vaultPath must not be empty.";
+        var modeNorm = (mode ?? "merge").Trim().ToLowerInvariant();
+        if (modeNorm is not ("merge" or "overlay" or "replace"))
+            return "❌ mode must be one of: merge, overlay, replace.";
+
+        VaultBackend source;
+        try { source = new VaultBackend(vaultPath); }
+        catch (Exception ex) { return $"❌ Could not open vault '{vaultPath}': {ex.Message}"; }
+
+        var incoming = source.LoadAll();
+        if (incoming.Count == 0)
+            return $"No managed memories found at '{source.Location}'.";
+
+        return _store.WithFreshState(memories =>
         {
-            return (_memories.Count, _persistence.IsEnabled, _persistence.Path);
-        }
+            if (modeNorm == "replace")
+            {
+                int prior = memories.Count;
+                _store.ReplaceAll(incoming);
+                return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
+            }
+
+            int added = 0, replaced = 0, kept = 0;
+            var byId = memories.ToDictionary(m => m.Id, StringComparer.Ordinal);
+            foreach (var inc in incoming)
+            {
+                if (byId.ContainsKey(inc.Id))
+                {
+                    if (modeNorm == "overlay")
+                    {
+                        int idx = memories.FindIndex(m => m.Id == inc.Id);
+                        memories[idx] = inc;
+                        _store.Upsert(inc);
+                        replaced++;
+                    }
+                    else
+                    {
+                        kept++;
+                    }
+                }
+                else
+                {
+                    memories.Add(inc);
+                    _store.Upsert(inc);
+                    added++;
+                }
+            }
+            return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
+        });
+    }
+
+    [McpServerTool(Name = "koshi_memory_sync_vault"), Description(
+        "Force a re-scan of the vault backend so external edits and git pulls are picked up. " +
+        "No-op when the backend is not a vault.")]
+    public static string SyncVault()
+    {
+        if (!_store.Backend.RequiresReloadPerCall)
+            return $"Backend '{_store.Backend.BackendKind}' is not a vault — no sync needed.";
+
+        // WithFreshState already triggers a vault reload when RequiresReloadPerCall is true.
+        return _store.WithFreshState(memories =>
+            $"✅ Reloaded vault. {memories.Count} memories now in cache.");
+    }
+
+    internal static MemoryStatus GetStatus()
+    {
+        return _store.WithFreshState(memories => new MemoryStatus(
+            Count: memories.Count,
+            PersistenceEnabled: _store.Backend.IsEnabled,
+            Path: _store.Backend.Location,
+            BackendKind: _store.Backend.BackendKind,
+            UnmanagedNoteCount: _store.Backend.UnmanagedNoteCount,
+            DuplicateIdWarningCount: _store.Backend.DuplicateIdWarningCount));
     }
 }
+
+internal sealed record MemoryStatus(
+    int Count,
+    bool PersistenceEnabled,
+    string? Path,
+    string BackendKind,
+    int UnmanagedNoteCount,
+    int DuplicateIdWarningCount);

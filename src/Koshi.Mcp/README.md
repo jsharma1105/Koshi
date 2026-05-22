@@ -230,7 +230,7 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 
 ---
 
-## Available Tools (20)
+## Available Tools (23)
 
 ### 🔍 Retrieval (5)
 
@@ -250,15 +250,18 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 | `koshi_token_count` | Count GPT-4 (cl100k) tokens for any text. |
 | `koshi_budget_plan` | Plan a token budget allocation across roles and show cache-prefix savings. |
 
-### 🧠 Memory (5)
+### 🧠 Memory (8)
 
 | Tool | Purpose |
 |------|---------|
 | `koshi_remember` | Store a typed memory (Fact / Decision / Pattern / Preference) with confidence and source. |
 | `koshi_recall` | Recall memories by topic, ranked by keyword match + recency + confidence. |
-| `koshi_memory_stats` | Counts by type, top subjects, average confidence, persistence status. |
+| `koshi_memory_stats` | Counts by type, top subjects, average confidence, persistence status, backend kind, unmanaged-note count (vault). |
 | `koshi_forget` | Remove all memories matching a subject. |
 | `koshi_clear_memories` | Delete every stored memory (requires `confirm=true`). |
+| `koshi_memory_export_to_vault` | Bulk-export the current memory store to a Markdown vault directory. See [Vault Mode](../../docs/vault-mode.md). |
+| `koshi_memory_import_from_vault` | Import memories from a Markdown vault. Modes: `merge` / `overlay` / `replace`. |
+| `koshi_memory_sync_vault` | Force a fresh re-scan of the active vault (no-op for the JSON backend). |
 
 ### 👥 Team & Quality (5)
 
@@ -287,7 +290,8 @@ Koshi is configured exclusively through **environment variables** (no config fil
 |---------|---------|---------|
 | `KOSHI_INDEX_PATH` | _(unset)_ | Absolute path that `koshi_search` will auto-index on first use. Without this, callers must invoke `koshi_index_directory` explicitly. |
 | `KOSHI_INDEX_FILE` | _(unset)_ | Absolute path to a JSON file used to persist the BM25 retrieval index across server restarts. On startup the snapshot is auto-loaded and validated against the live filesystem (`relpath + size + mtime` fingerprint); stale snapshots are discarded and a re-index runs. Atomic writes, schema-versioned. When unset, the index lives only for the current process and a re-chunk pass runs on every restart. |
-| `KOSHI_MEMORY_FILE` | _(unset)_ | Absolute path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. When unset, memories live only for the current process. |
+| `KOSHI_MEMORY_FILE` | _(unset)_ | Absolute path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. When unset, memories live only for the current process. **Ignored when `KOSHI_MEMORY_VAULT` is also set** (a one-line stderr warning is emitted). |
+| `KOSHI_MEMORY_VAULT` | _(unset)_ | Absolute path to a directory used to persist memories as **one Markdown file per memory** under `<vault>/koshi/<type>/`. Git-friendly, Obsidian-compatible. External edits/deletes are picked up on the next tool call without a restart. See [docs/vault-mode.md](../../docs/vault-mode.md) for the full format spec and migration guide. |
 
 **Default safety limits** (hardcoded; tweakable per-call where applicable):
 
@@ -347,6 +351,53 @@ Later, in any session:
 ```
 koshi_recall(query="auth database", type="Decision")
 ```
+
+### 3a. Share memories across the team via a Git-backed vault (v0.6.0+)
+
+Want your teammates to inherit the same memories you've stored? Point
+Koshi at a directory and commit it to Git:
+
+```bash
+mkdir -p ~/teams/our-memories
+export KOSHI_MEMORY_VAULT=~/teams/our-memories
+
+# (optional) check it into a shared repo
+cd ~/teams/our-memories
+git init && git add koshi/ && git commit -m "seed memories"
+```
+
+Every `koshi_remember` from now on writes one Markdown file:
+
+```
+~/teams/our-memories/
+└── koshi/
+    └── decisions/
+        └── auth-service-database--mem-000001.md
+```
+
+…with human-readable YAML frontmatter:
+
+```yaml
+---
+koshi:
+  id: mem-000001
+  type: Decision
+  scope: { user: "*", workspace: default, thread: null }
+  source: arch-meeting-2026-04
+  confidence: 0.95
+  # ...
+---
+# auth-service-database
+
+Use Postgres 16 with row-level security for the auth service.
+```
+
+External edits, deletes, and `git pull`s are picked up on the next tool
+call without a server restart. Hand-written notes that lack a `koshi.id`
+in their frontmatter are reported as "unmanaged notes" in
+`koshi_memory_stats` but never overwritten. See
+[docs/vault-mode.md](../../docs/vault-mode.md) for the full format spec,
+migration guide, and FAQ.
 
 ### 4. Track team quality
 

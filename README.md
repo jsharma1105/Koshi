@@ -17,18 +17,18 @@
 
 ## What Koshi is, in three sentences
 
-Koshi (講師, "instructor") is a **context-engineering toolkit for AI agents**, shipped as a Model Context Protocol (MCP) server. It bundles four pillars — **retrieval**, **memory**, **context-packing**, and **team telemetry** — into a single .NET 10 binary with **20 MCP tools** and **zero cloud dependencies**. Install it as a `dotnet tool`, point Claude Code or GitHub Copilot CLI at it, and stop re-implementing the same agent plumbing in every project.
+Koshi (講師, "instructor") is a **context-engineering toolkit for AI agents**, shipped as a Model Context Protocol (MCP) server. It bundles four pillars — **retrieval**, **memory**, **context-packing**, and **team telemetry** — into a single .NET 10 binary with **23 MCP tools** and **zero cloud dependencies**. Install it as a `dotnet tool`, point Claude Code or GitHub Copilot CLI at it, and stop re-implementing the same agent plumbing in every project.
 
 ## The four pillars
 
 | Pillar | Tools | What it solves |
 |---|---|---|
 | 🔎 **Retrieval** | `koshi_index`, `koshi_index_directory`, `koshi_search`, `koshi_list_indexed`, `koshi_clear_index` | BM25 over a persistent token-aware index. Index code/docs once, search forever. |
-| 🧠 **Memory** | `koshi_remember`, `koshi_recall`, `koshi_memory_stats`, `koshi_forget`, `koshi_clear_memories` | Durable facts, decisions, patterns that survive across sessions. |
+| 🧠 **Memory** | `koshi_remember`, `koshi_recall`, `koshi_memory_stats`, `koshi_forget`, `koshi_clear_memories`, `koshi_memory_export_to_vault`, `koshi_memory_import_from_vault`, `koshi_memory_sync_vault` | Durable facts, decisions, patterns that survive across sessions — optionally as one Markdown file per memory in a Git-friendly **vault** ([docs](docs/vault-mode.md)). |
 | 📦 **Context** | `koshi_compile_context`, `koshi_token_count`, `koshi_budget_plan` | Token-budgeted prompt assembly. Give it a budget; it ranks, dedupes, trims. |
 | 📊 **Telemetry** | `koshi_register_team`, `koshi_score_turn`, `koshi_team_dashboard`, `koshi_analyze_feedback`, `koshi_list_teams` | Score agent turns. See where your team is bleeding tokens or accuracy. |
 
-Plus 2 diagnostics tools (`koshi_version`, `koshi_health`). **20 total.**
+Plus 2 diagnostics tools (`koshi_version`, `koshi_health`). **23 total.**
 
 ## 60-second install
 
@@ -139,8 +139,9 @@ For Python-package development, see [`CONTRIBUTING.md`](CONTRIBUTING.md#python-p
 
 ## Documentation
 
-- [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 20 tools indexed.
+- [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 23 tools indexed.
 - [**MCP server reference**](src/Koshi.Mcp/README.md) — every tool, every argument, every client snippet.
+- [**Vault mode**](docs/vault-mode.md) — share memories across teams via a Git-backed Markdown vault (`KOSHI_MEMORY_VAULT`).
 - [**Sub-agent personas**](AGENTS.md) — librarian, memory-keeper, context-packer, quality-coach, orchestrator.
 - [**Security policy**](SECURITY.md) — what's in scope, what's not, how to report.
 - [**Changelog**](CHANGELOG.md) — every release, every change.

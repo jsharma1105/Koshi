@@ -5,6 +5,95 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-22
+
+### Added
+- **Vault-mode memory backend (`KOSHI_MEMORY_VAULT`) — share memories across teams via Git.**
+  Setting this env var to a directory makes Koshi store every memory as a
+  human-readable `.md` file with YAML frontmatter under
+  `<vault>/koshi/{facts,decisions,patterns,preferences}/`, instead of the
+  single opaque JSON envelope used by `KOSHI_MEMORY_FILE`. Memories are
+  Git-friendly (one file per memory → clean diffs, no merge storms),
+  Obsidian/Foam/Logseq-compatible, and editable in any text editor —
+  external edits, deletes, and Git pulls are picked up on the next tool
+  call without a server restart. See [`docs/vault-mode.md`](docs/vault-mode.md)
+  for the format spec and migration guide.
+- **Three new MCP tools for vault interop:**
+  - `koshi_memory_export_to_vault(vaultPath, overwrite)` — bulk-export the
+    current memory store to a vault directory.
+  - `koshi_memory_import_from_vault(vaultPath, mode)` — import memories
+    from a vault into the current backend. Modes: `merge` (keep current on
+    id collision), `overlay` (vault wins on id collision), `replace`
+    (destructive, full swap).
+  - `koshi_memory_sync_vault()` — force a fresh re-scan of the vault and
+    refresh the in-memory cache (no-op for the JSON backend).
+- **Unmanaged-note reporting.** Any `.md` file under `<vault>/koshi/` that
+  lacks a `koshi.id` in its frontmatter is reported in `koshi_memory_stats`
+  as an "unmanaged note" — surfaced but never auto-promoted into the memory
+  store and never overwritten.
+- **`koshi_memory_stats` now reports the active backend kind, location,
+  unmanaged-note count, and duplicate-id warning count** so users can see
+  at a glance whether the JSON or vault backend is active.
+- **`KOSHI_MEMORY_VAULT` added to `koshi_diagnostics` output** alongside the
+  other env vars.
+
+### Format (vault mode)
+- One `.md` file per memory at
+  `<vault>/koshi/<type>/<subject-slug>--<id>.md` (e.g.
+  `koshi/decisions/we-chose-dapper-over-ef--mem-000123.md`).
+- File identity is `koshi.id` from frontmatter — **filename is cosmetic**.
+  Subject rename → atomic move to new path + delete of old path; the id
+  follows the file.
+- Frontmatter stores: `id, type, scope.{user,workspace,thread}, source,
+  confidence, created-at, updated-at, last-accessed-at, access-count, tier`
+  (plus `superseded-by` / `contradiction-note` only when non-null).
+- **Derived fields (embeddings, compressed-content) are intentionally
+  omitted** from disk to avoid bloating Git diffs — they regenerate on
+  demand.
+- **Unknown top-level frontmatter keys** (your own `aliases:`, `cssclass:`,
+  `publish:`, etc.) are preserved verbatim on rewrite — Koshi only edits
+  the `koshi:` block.
+
+### Behaviour
+- When both `KOSHI_MEMORY_VAULT` and `KOSHI_MEMORY_FILE` are set, the vault
+  wins and a one-line stderr warning is emitted; `KOSHI_MEMORY_FILE` is
+  ignored.
+- Vault mode reloads from disk on **every tool call** — external deletes,
+  edits, and Git pulls take effect immediately without restart.
+- ID allocation re-scans the vault before allocating, so externally-added
+  memories can't collide with `mem-NNNNNN` ids generated in-process.
+- Duplicate `koshi.id` across two files (a possible Git-merge artifact) —
+  newer file mtime wins and a stderr warning is emitted; both files are
+  never loaded.
+- Atomic writes (temp file + `File.Move(overwrite:true)`) on every mutation;
+  half-written `.tmp` files left by a crash are ignored by subsequent loads.
+
+### Compatibility
+- **`KOSHI_MEMORY_FILE` behaviour is byte-identical to v0.5.1** when
+  `KOSHI_MEMORY_VAULT` is not set. Existing users see zero change.
+- The internal `MemoryPersistence` type was renamed to `JsonFileBackend` and
+  now implements a new internal `IMemoryBackend` interface (vault/json
+  swap-in). Public API surface is unchanged.
+
+### Tests
+- 65 new unit tests across `SlugTests`, `VaultDocumentTests`,
+  `VaultBackendTests`, `JsonFileBackendTests`, `MemoryStoreTests` —
+  including a cache-divergence regression guard that catches the bug where
+  an external file delete is masked by a stale in-process cache.
+- The smoke test gained a dedicated **vault-mode phase**: spawns a second
+  server process with `KOSHI_MEMORY_VAULT` set, exercises remember/recall/
+  external-edit/external-delete/unmanaged-note paths against the live MCP
+  protocol.
+
+### Not in scope (deferred to 0.6.1 / 0.7.0)
+- `FileSystemWatcher`-driven cache invalidation (deferred to 0.6.1) — vault
+  mode currently reloads on every tool call, which is correct but does a
+  directory scan per call. The watcher will let us skip the scan when the
+  cache is known fresh.
+- Logseq/Dendron file-layout adapters (deferred to 0.7.0). The current
+  layout is Obsidian-flavoured Markdown, which also works in Foam and
+  Logseq's "Markdown mode".
+
 ## [0.5.1] - 2026-05-19
 
 ### Fixed
