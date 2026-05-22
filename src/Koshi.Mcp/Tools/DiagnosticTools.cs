@@ -65,6 +65,7 @@ public sealed class DiagnosticTools
         {
             sb.AppendLine($"    Unmanaged:   {memStatus.UnmanagedNoteCount}");
             sb.AppendLine($"    Dup-id warn: {memStatus.DuplicateIdWarningCount}");
+            sb.AppendLine($"    Watcher:     {memStatus.VaultWatcherStatus ?? "(unknown)"}");
         }
         sb.AppendLine();
 

@@ -409,17 +409,21 @@ public sealed class MemoryTools
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
 
         VaultBackend target;
-        try { target = new VaultBackend(resolved); }
+        try { target = new VaultBackend(resolved, watch: false); }
         catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
-        var existing = target.LoadAll();
-        if (existing.Count > 0 && !overwrite)
-            return $"❌ Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
-                   "Pass overwrite=true to replace them.";
+        try
+        {
+            var existing = target.LoadAll();
+            if (existing.Count > 0 && !overwrite)
+                return $"❌ Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
+                       "Pass overwrite=true to replace them.";
 
-        var snapshot = _store.WithFreshState(memories => memories.ToList());
-        target.ReplaceAll(snapshot);
-        return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
+            var snapshot = _store.WithFreshState(memories => memories.ToList());
+            target.ReplaceAll(snapshot);
+            return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
+        }
+        finally { target.Dispose(); }
     }
 
     [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
@@ -440,49 +444,53 @@ public sealed class MemoryTools
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
 
         VaultBackend source;
-        try { source = new VaultBackend(resolved); }
+        try { source = new VaultBackend(resolved, watch: false); }
         catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
-        var incoming = source.LoadAll();
-        if (incoming.Count == 0)
-            return $"No managed memories found at '{source.Location}'.";
-
-        return _store.WithFreshState(memories =>
+        try
         {
-            if (modeNorm == "replace")
-            {
-                int prior = memories.Count;
-                _store.ReplaceAll(incoming);
-                return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
-            }
+            var incoming = source.LoadAll();
+            if (incoming.Count == 0)
+                return $"No managed memories found at '{source.Location}'.";
 
-            int added = 0, replaced = 0, kept = 0;
-            var byId = memories.ToDictionary(m => m.Id, StringComparer.Ordinal);
-            foreach (var inc in incoming)
+            return _store.WithFreshState(memories =>
             {
-                if (byId.ContainsKey(inc.Id))
+                if (modeNorm == "replace")
                 {
-                    if (modeNorm == "overlay")
+                    int prior = memories.Count;
+                    _store.ReplaceAll(incoming);
+                    return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
+                }
+
+                int added = 0, replaced = 0, kept = 0;
+                var byId = memories.ToDictionary(m => m.Id, StringComparer.Ordinal);
+                foreach (var inc in incoming)
+                {
+                    if (byId.ContainsKey(inc.Id))
                     {
-                        int idx = memories.FindIndex(m => m.Id == inc.Id);
-                        memories[idx] = inc;
-                        _store.Upsert(inc);
-                        replaced++;
+                        if (modeNorm == "overlay")
+                        {
+                            int idx = memories.FindIndex(m => m.Id == inc.Id);
+                            memories[idx] = inc;
+                            _store.Upsert(inc);
+                            replaced++;
+                        }
+                        else
+                        {
+                            kept++;
+                        }
                     }
                     else
                     {
-                        kept++;
+                        memories.Add(inc);
+                        _store.Upsert(inc);
+                        added++;
                     }
                 }
-                else
-                {
-                    memories.Add(inc);
-                    _store.Upsert(inc);
-                    added++;
-                }
-            }
-            return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
-        });
+                return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
+            });
+        }
+        finally { source.Dispose(); }
     }
 
     [McpServerTool(Name = "koshi_memory_sync_vault"), Description(
@@ -490,12 +498,12 @@ public sealed class MemoryTools
         "No-op when the backend is not a vault.")]
     public static string SyncVault()
     {
-        if (!_store.Backend.RequiresReloadPerCall)
+        if (_store.Backend.BackendKind != "vault")
             return $"Backend '{_store.Backend.BackendKind}' is not a vault — no sync needed.";
 
-        // WithFreshState already triggers a vault reload when RequiresReloadPerCall is true.
-        return _store.WithFreshState(memories =>
-            $"✅ Reloaded vault. {memories.Count} memories now in cache.");
+        _store.ForceReload();
+        var count = _store.WithFreshState(memories => memories.Count);
+        return $"✅ Reloaded vault. {count} memories now in cache.";
     }
 
     internal static MemoryStatus GetStatus()
@@ -506,7 +514,8 @@ public sealed class MemoryTools
             Path: _store.Backend.Location,
             BackendKind: _store.Backend.BackendKind,
             UnmanagedNoteCount: _store.Backend.UnmanagedNoteCount,
-            DuplicateIdWarningCount: _store.Backend.DuplicateIdWarningCount));
+            DuplicateIdWarningCount: _store.Backend.DuplicateIdWarningCount,
+            VaultWatcherStatus: _store.Backend is VaultBackend vb ? vb.WatcherStatus : null));
     }
 }
 
@@ -516,4 +525,5 @@ internal sealed record MemoryStatus(
     string? Path,
     string BackendKind,
     int UnmanagedNoteCount,
-    int DuplicateIdWarningCount);
+    int DuplicateIdWarningCount,
+    string? VaultWatcherStatus);

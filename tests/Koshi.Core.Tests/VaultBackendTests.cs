@@ -36,7 +36,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Upsert_writes_file_under_type_subdir()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var rec = Make("mem-000001", MemoryType.Decision, "Chose Dapper");
 
         be.Upsert(rec, [rec]);
@@ -48,7 +48,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Upsert_creates_all_type_subdirectories_on_init()
     {
-        _ = new VaultBackend(_vault);
+        _ = new VaultBackend(_vault, watch: false);
 
         Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "facts")));
         Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "decisions")));
@@ -59,7 +59,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Upsert_same_id_twice_results_in_single_file()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var v1 = Make("mem-000001", MemoryType.Fact, "Title", "original content");
         be.Upsert(v1, [v1]);
 
@@ -74,7 +74,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Upsert_with_changed_subject_moves_file()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var v1 = Make("mem-000001", MemoryType.Pattern, "Old Subject");
         be.Upsert(v1, [v1]);
         var oldPath = Path.Combine(_vault, "koshi", "patterns", "old-subject--mem-000001.md");
@@ -94,7 +94,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Delete_removes_file()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var rec = Make("mem-000001", MemoryType.Fact, "Doomed");
         be.Upsert(rec, [rec]);
         be.LoadAll(); // populate _idToPath
@@ -108,7 +108,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void LoadAll_picks_up_externally_added_file()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         Assert.Empty(be.LoadAll());
 
         // External agent (e.g., git pull) drops a properly-formatted .md file.
@@ -142,7 +142,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void LoadAll_reports_files_without_koshi_id_as_unmanaged()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var plain = Path.Combine(_vault, "koshi", "my-personal-note.md");
         File.WriteAllText(plain, "# Just my note\n\nNo frontmatter here.\n");
 
@@ -156,7 +156,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void User_added_frontmatter_keys_survive_Upsert()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var rec = Make("mem-000010", MemoryType.Fact, "Tagged fact");
         be.Upsert(rec, [rec]);
         be.LoadAll();
@@ -182,7 +182,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void ReplaceAll_deletes_managed_files_but_keeps_unmanaged()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var rec = Make("mem-000001", MemoryType.Fact, "Will be replaced");
         be.Upsert(rec, [rec]);
 
@@ -203,7 +203,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Duplicate_id_across_files_picks_newest_mtime()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
 
         // Same id in two different paths (e.g., post-merge artifact).
         var earlier = Path.Combine(_vault, "koshi", "facts", "earlier--mem-000005.md");
@@ -240,7 +240,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void External_deletion_is_reflected_on_next_LoadAll()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var a = Make("mem-000001", MemoryType.Fact, "Will be deleted");
         var b = Make("mem-000002", MemoryType.Fact, "Will remain");
         be.Upsert(a, [a, b]);
@@ -260,7 +260,7 @@ public class VaultBackendTests : IDisposable
     [Fact]
     public void Tmp_files_are_ignored_by_LoadAll()
     {
-        var be = new VaultBackend(_vault);
+        var be = new VaultBackend(_vault, watch: false);
         var rec = Make("mem-000001", MemoryType.Fact, "Real");
         be.Upsert(rec, [rec]);
 

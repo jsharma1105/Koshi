@@ -5,6 +5,37 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - Unreleased
+
+### Added
+- **Vault file-system watcher — hot-reload without per-call directory scans.**
+  When `KOSHI_MEMORY_VAULT` is set, Koshi now attaches a `FileSystemWatcher`
+  to `<vault>/koshi/**/*.md` and only reloads the in-memory cache when an
+  external change is observed (git pull, Obsidian edit, manual edit). The
+  v0.6.0 behavior was to rescan the whole directory tree on every tool call;
+  on large vaults this added ~10-50 ms of fixed latency per call. The watcher
+  reduces the steady-state cost to near zero while preserving correctness.
+- New env var `KOSHI_VAULT_WATCH` (`on`/`off`/`true`/`false`/`0`/`1`/etc.,
+  default `on`) for disabling the watcher when running over network mounts,
+  containers, or any FS that does not deliver inotify-style events
+  reliably. When disabled, Koshi falls back to v0.6.0 "reload on every call"
+  semantics — same correctness, slightly higher latency.
+- `koshi_health` reports the watcher status (`healthy` / `disabled` /
+  `unavailable`) when the active backend is a vault.
+
+### Changed
+- Internal: replaced `IMemoryBackend.RequiresReloadPerCall` (property) with
+  `IMemoryBackend.ShouldReload()` (method) so backends can return `false`
+  when their cache is known to be fresh. JSON backend unchanged (returns
+  `false` always); vault backend uses read-and-clear semantics on a dirty
+  bit set by the watcher callback.
+
+### Fixed
+- Transient `VaultBackend` instances created by `koshi_memory_export_to_vault`
+  / `koshi_memory_import_from_vault` no longer attach a file-system watcher
+  (they're disposed immediately after use); also explicitly disposed via
+  `try/finally`.
+
 ## [0.6.0] - 2026-05-22
 
 ### Added

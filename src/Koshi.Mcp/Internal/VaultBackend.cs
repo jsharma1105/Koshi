@@ -1,3 +1,4 @@
+using System.Threading;
 using Koshi.Core.Memory;
 
 namespace Koshi.Mcp.Internal;
@@ -11,12 +12,14 @@ namespace Koshi.Mcp.Internal;
 /// Identity is <see cref="MemoryRecord.Id"/>; the filename slug is cosmetic. On
 /// subject rename, the file is atomically moved to a new path with the same id.
 /// <para>
-/// <see cref="LoadAll"/> rescans the directory tree every call; <see cref="MemoryStore"/>
-/// invokes it on every tool-call entry so external edits / git pulls / Obsidian
-/// changes are picked up without restarting the MCP server.
+/// External edits / git pulls / Obsidian writes are picked up via a
+/// <see cref="FileSystemWatcher"/> over <c>&lt;vault&gt;/koshi/**/*.md</c>; when an
+/// event is observed <see cref="ShouldReload"/> returns true once on the next call.
+/// When the watcher cannot attach (e.g. network mount), the backend falls back to
+/// "reload on every call" semantics. Disable via <c>KOSHI_VAULT_WATCH=off|false|0</c>.
 /// </para>
 /// </remarks>
-internal sealed class VaultBackend : IMemoryBackend
+internal sealed class VaultBackend : IMemoryBackend, IDisposable
 {
     public string Root { get; }
     public string KoshiDir { get; }
@@ -24,7 +27,17 @@ internal sealed class VaultBackend : IMemoryBackend
     public bool IsEnabled => true;
     public string? Location => Root;
     public string BackendKind => "vault";
-    public bool RequiresReloadPerCall => true;
+
+    private readonly FileSystemWatcher? _watcher;
+    private readonly bool _watchRequested;
+    private readonly bool _watcherAttached;
+    private int _dirty;
+
+    /// <summary>Diagnostic string for koshi_health output.</summary>
+    public string WatcherStatus =>
+        !_watchRequested ? "disabled (KOSHI_VAULT_WATCH=off)"
+        : _watcherAttached ? "healthy"
+        : "unavailable (fallback: reload-per-call)";
 
     private int _unmanagedNoteCount;
     private List<string> _unmanagedNotePaths = [];
@@ -35,11 +48,92 @@ internal sealed class VaultBackend : IMemoryBackend
     public IReadOnlyList<string> UnmanagedNotePaths => _unmanagedNotePaths;
     public int DuplicateIdWarningCount => _duplicateIdWarningCount;
 
-    public VaultBackend(string vaultRoot)
+    public VaultBackend(string vaultRoot) : this(vaultRoot, watch: true) { }
+
+    public VaultBackend(string vaultRoot, bool watch)
     {
         Root = Path.GetFullPath(vaultRoot);
         KoshiDir = Path.Combine(Root, "koshi");
         EnsureKoshiDirs();
+
+        _watchRequested = watch && WatcherEnvAllows();
+        if (_watchRequested)
+        {
+            try
+            {
+                _watcher = new FileSystemWatcher(KoshiDir, "*.md")
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName
+                                 | NotifyFilters.LastWrite
+                                 | NotifyFilters.Size
+                                 | NotifyFilters.CreationTime,
+                };
+                _watcher.Created += OnVaultEvent;
+                _watcher.Changed += OnVaultEvent;
+                _watcher.Deleted += OnVaultEvent;
+                _watcher.Renamed += OnVaultEvent;
+                _watcher.Error += OnWatcherError;
+                _watcher.EnableRaisingEvents = true;
+                _watcherAttached = true;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[koshi] Vault watcher could not attach to '{KoshiDir}' ({ex.GetType().Name}: {ex.Message}); " +
+                    "falling back to reload-on-every-call.");
+                _watcher?.Dispose();
+                _watcher = null;
+                _watcherAttached = false;
+            }
+        }
+    }
+
+    private static bool WatcherEnvAllows()
+    {
+        var v = Environment.GetEnvironmentVariable("KOSHI_VAULT_WATCH");
+        if (string.IsNullOrEmpty(v)) return true;
+        return v.Trim().ToLowerInvariant() switch
+        {
+            "0" or "off" or "false" or "no" or "disabled" => false,
+            _ => true,
+        };
+    }
+
+    private void OnVaultEvent(object sender, FileSystemEventArgs e) =>
+        Interlocked.Exchange(ref _dirty, 1);
+
+    private void OnWatcherError(object sender, ErrorEventArgs e)
+    {
+        Console.Error.WriteLine(
+            $"[koshi] Vault watcher error: {e.GetException().Message}. Marking cache dirty.");
+        Interlocked.Exchange(ref _dirty, 1);
+    }
+
+    /// <summary>
+    /// Returns true once when the watcher has seen activity since the last reload,
+    /// or unconditionally when no watcher is attached.
+    /// </summary>
+    public bool ShouldReload()
+    {
+        if (!_watcherAttached) return true;
+        return Interlocked.CompareExchange(ref _dirty, 0, 1) == 1;
+    }
+
+    public void Dispose()
+    {
+        if (_watcher is null) return;
+        try
+        {
+            _watcher.EnableRaisingEvents = false;
+            _watcher.Created -= OnVaultEvent;
+            _watcher.Changed -= OnVaultEvent;
+            _watcher.Deleted -= OnVaultEvent;
+            _watcher.Renamed -= OnVaultEvent;
+            _watcher.Error -= OnWatcherError;
+            _watcher.Dispose();
+        }
+        catch { /* best effort on shutdown */ }
     }
 
     private void EnsureKoshiDirs()

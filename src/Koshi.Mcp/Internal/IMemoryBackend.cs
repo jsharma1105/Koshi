@@ -23,10 +23,16 @@ internal interface IMemoryBackend
     string BackendKind { get; }
 
     /// <summary>
-    /// When true, the store reloads from disk on every tool-call entry. Required for vault
-    /// mode where external edits/git pulls must take effect without restarting the MCP.
+    /// Returns true when the next read should reload from disk. JSON returns false
+    /// (in-memory cache is authoritative after the initial load). Vault returns true
+    /// when an external change has been observed since the last reload, OR when no
+    /// filesystem watcher is attached (degraded "always reload" fallback).
     /// </summary>
-    bool RequiresReloadPerCall { get; }
+    /// <remarks>
+    /// Implementations may have read-and-clear semantics — call exactly once per
+    /// tool entry, immediately followed by <see cref="LoadAll"/> when true is returned.
+    /// </remarks>
+    bool ShouldReload();
 
     /// <summary>Loads all memories from disk. Returns empty list if unconfigured or empty.</summary>
     List<MemoryRecord> LoadAll();

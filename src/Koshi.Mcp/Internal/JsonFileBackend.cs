@@ -20,7 +20,7 @@ internal sealed class JsonFileBackend : IMemoryBackend
     public bool IsEnabled => Path is not null;
     public string? Location => Path;
     public string BackendKind => "json";
-    public bool RequiresReloadPerCall => false;
+    public bool ShouldReload() => false;
 
     public int UnmanagedNoteCount => 0;
     public IReadOnlyList<string> UnmanagedNotePaths => [];
