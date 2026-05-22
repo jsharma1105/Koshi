@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Reflection;
+using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
 
 namespace Koshi.Mcp.Tools;
@@ -46,18 +47,43 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    File:        {indexStatus.persistencePath ?? "(in-memory only)"}");
         if (indexStatus.loadedFromSnapshot)
             sb.AppendLine($"    Loaded:      from snapshot");
+        var namedCorpora = RetrievalTools.GetNamedCorporaStatus();
+        if (namedCorpora.Count > 0)
+        {
+            sb.AppendLine($"    Named corpora: {namedCorpora.Count}");
+            foreach (var nc in namedCorpora)
+                sb.AppendLine($"      • {nc.name}: {nc.chunks} chunks from {nc.sources} sources ({nc.path ?? "in-memory"})");
+        }
         sb.AppendLine();
 
         sb.AppendLine("  Memory:");
-        sb.AppendLine($"    Records:     {memStatus.count}");
-        sb.AppendLine($"    Persistence: {(memStatus.persistenceEnabled ? "enabled" : "disabled")}");
-        sb.AppendLine($"    File:        {memStatus.path ?? "(in-memory only)"}");
+        sb.AppendLine($"    Records:     {memStatus.Count}");
+        sb.AppendLine($"    Backend:     {memStatus.BackendKind}");
+        sb.AppendLine($"    Persistence: {(memStatus.PersistenceEnabled ? "enabled" : "disabled")}");
+        sb.AppendLine($"    Location:    {memStatus.Path ?? "(in-memory only)"}");
+        if (memStatus.BackendKind == "vault")
+        {
+            sb.AppendLine($"    Unmanaged:   {memStatus.UnmanagedNoteCount}");
+            sb.AppendLine($"    Dup-id warn: {memStatus.DuplicateIdWarningCount}");
+            sb.AppendLine($"    Watcher:     {memStatus.VaultWatcherStatus ?? "(unknown)"}");
+            sb.AppendLine($"    Flavor:      {memStatus.VaultFlavor ?? "(unknown)"}");
+        }
         sb.AppendLine();
 
-        sb.AppendLine("  Configuration (env vars):");
-        sb.AppendLine($"    KOSHI_INDEX_PATH:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH") ?? "(unset)"}");
-        sb.AppendLine($"    KOSHI_INDEX_FILE:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE") ?? "(unset)"}");
-        sb.AppendLine($"    KOSHI_MEMORY_FILE:  {Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE") ?? "(unset)"}");
+        sb.AppendLine("  Configuration (resolved paths):");
+        var paths = PathConfig.Default;
+        sb.AppendLine($"    Project root:       {paths.ProjectRoot}  [{PathConfig.SourceLabel(paths.ProjectRootFromEnv)}]");
+        sb.AppendLine($"    KOSHI_INDEX_PATH:   {paths.IndexPath}  [{PathConfig.SourceLabel(paths.IndexPathFromEnv)}]");
+        sb.AppendLine($"      auto-index:       {(paths.IndexPathFromEnv ? "enabled (env)" : "disabled (set KOSHI_INDEX_PATH to enable)")}");
+        sb.AppendLine($"    KOSHI_INDEX_FILE:   {paths.IndexFile}  [{PathConfig.SourceLabel(paths.IndexFileFromEnv)}]");
+        sb.AppendLine($"    KOSHI_MEMORY_FILE:  {paths.MemoryFile}  [{PathConfig.SourceLabel(paths.MemoryFileFromEnv)}]");
+        sb.AppendLine($"    KOSHI_MEMORY_VAULT: {paths.MemoryVault ?? "(unset)"}  [{(paths.MemoryVaultFromEnv ? "env" : "default")}]");
+        sb.AppendLine($"    KOSHI_TOKENIZER_MODEL: {Koshi.Core.Tokenization.TokenCounters.ModelName}");
+        var embedProvider = Koshi.Core.Retrieval.EmbeddingProviderRegistry.Current;
+        if (embedProvider is null)
+            sb.AppendLine("    Embedding provider:    not configured (BM25-only)");
+        else
+            sb.AppendLine($"    Embedding provider:    {embedProvider.ModelName} (dim={embedProvider.Dimensions})");
         sb.AppendLine();
 
         var uptime = DateTimeOffset.UtcNow - _startedAt;

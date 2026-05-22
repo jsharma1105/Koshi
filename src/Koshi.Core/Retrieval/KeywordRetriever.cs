@@ -1,6 +1,7 @@
 namespace Koshi.Core.Retrieval;
 
 using Koshi.Core.Models;
+using Koshi.Core.Tokenization;
 
 /// <summary>
 /// BM25 keyword search implementation.
@@ -18,6 +19,16 @@ public sealed class KeywordRetriever : IRetriever
 
     private const double K1 = 1.5;
     private const double B = 0.75;
+
+    private static readonly bool StemmingEnabled = ResolveStemming();
+    private static bool ResolveStemming()
+    {
+        var raw = Environment.GetEnvironmentVariable("KOSHI_BM25_STEMMING");
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        return !(raw.Equals("off", StringComparison.OrdinalIgnoreCase)
+              || raw.Equals("false", StringComparison.OrdinalIgnoreCase)
+              || raw.Equals("0", StringComparison.Ordinal));
+    }
 
     public void Index(IReadOnlyList<Chunk> chunks)
     {
@@ -120,10 +131,18 @@ public sealed class KeywordRetriever : IRetriever
         return Task.FromResult<IReadOnlyList<SearchResult>>(results);
     }
 
-    private static List<string> Tokenize(string text) =>
-        text.ToLowerInvariant()
+    private static List<string> Tokenize(string text)
+    {
+        var tokens = text.ToLowerInvariant()
             .Split([' ', '\t', '\n', '\r', '.', ',', '(', ')', '{', '}', '[', ']', ':', ';', '"', '\'', '/', '\\', '-', '_', '=', '>', '<', '!', '?', '#', '*', '|', '`'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(t => t.Length > 1)
             .ToList();
+
+        if (!StemmingEnabled) return tokens;
+
+        for (int i = 0; i < tokens.Count; i++)
+            tokens[i] = EnglishStemmer.Stem(tokens[i]);
+        return tokens;
+    }
 }

@@ -5,6 +5,398 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - Unreleased
+
+### Added
+- **`koshi_capture_turn` MCP tool — turn-end auto-capture for decisions.**
+  The agent passes a 1-3 paragraph summary of the turn (plus optional
+  `linked_pr` / `linked_commits` for provenance); the server runs a
+  lightweight pattern-based extractor (no LLM dep, AOT-friendly,
+  deterministic) and persists each decision-shape sentence as a
+  `Decision` memory under the active backend. Closes the auto-capture
+  gap that prior phases (supersession, lint, dedupe) need records to
+  operate on.
+- Decision extractor patterns (`Koshi.Core.Memory.DecisionExtractor`):
+  - `Decision: <text>` explicit marker (conf 0.95)
+  - `X over Y because Z` comparative with rationale (conf 0.90)
+  - `we / I / the team + chose / decided / picked / went with / opted for` (conf 0.80)
+  - `fixed by / resolved by / patched / worked around by` resolution markers (conf 0.75)
+  - `decided to / chose to / picked to / opted to` plain decision verbs (conf 0.70)
+- Questions and short fragments (<20 chars) are filtered out so chitchat
+  doesn't auto-capture.
+- `auto_promote=false` returns extracted candidates without persisting,
+  letting the agent or user preview captures before saving.
+- Subject-exact-match dedupe within scope at write time (string-match
+  only; full similarity-based dedupe lands in #44).
+- Provenance footer (`PR #N`, `commits <sha>...`, `captured: <ISO-8601>`)
+  appended to memory body when linked metadata is provided.
+- `docs/copilot-instructions-snippet.md` — recommended snippet teams
+  paste into their `.github/copilot-instructions.md` so MCP-aware agents
+  call the tool reliably without each repo reinventing the prompt.
+
+### Notes
+- Extraction is pattern-only by design (no LLM). False-negative rate is
+  the tradeoff — the snippet teaches the agent to phrase decisions
+  explicitly so the heuristics catch them. LLM-based extraction can be
+  layered on later without breaking the wire contract.
+- This tool is the cornerstone of the cross-developer "skip the
+  regression" workflow. Pairs with the upcoming #45 (supersession) and
+  #44 (similarity dedupe).
+
+### Fixed (review-pass on PR #47)
+- **Negation/hypothetical sentences no longer auto-capture.** Sentences
+  like "We did NOT choose Dapper over EF Core because of cost", "If we
+  had chosen X over Y", "Per the docs, you choose X over Y" previously
+  matched the comparative-with-rationale pattern at 0.9 and silently
+  persisted as Decision memories. They are now filtered upstream by
+  `IsCandidateSentence`. (Surfaced by opus-deep-review.)
+- **Bullet-list summaries now extract every decision instead of one.**
+  Real-world agent summaries are usually multi-bullet markdown lists;
+  the sentence splitter was treating them as one sentence and dropping
+  every decision except the highest-confidence one. The splitter now
+  breaks on `\n -`, `\n *`, `\n •`, `\n 1.`, `\n 1)` in addition to
+  sentence terminators and blank-line gaps. (Surfaced by opus-deep-review.)
+- **`Decision: <log-like-tail>` no longer captures as 0.95-confidence
+  garbage.** The explicit-marker pattern now requires an English-looking
+  tail (≥3 alpha characters), so log-fragment summaries like
+  `Decision: 200 OK was returned ...` no longer slip through.
+  (Surfaced by opus-deep-review.)
+- **Subject normalization: leading bullet markers stripped, internal
+  whitespace collapsed.** Two agents writing the same decision with
+  different whitespace or one prefixed with `- ` now produce identical
+  subject strings, so subject-exact-match dedupe actually catches
+  duplicates instead of letting near-twins through. (Surfaced by
+  opus-deep-review.)
+- **Capture dedupe now matches the full memory scope (UserId,
+  WorkspaceId, ThreadId), not just WorkspaceId.** One user's capture
+  could previously suppress another user's identical-subject capture
+  in the same workspace; thread-scoped captures couldn't coexist with
+  workspace-scoped ones. (Surfaced by codex-cross-review.)
+- **`No decision-shape sentences detected` message is no longer
+  misleading when the extractor returned zero candidates.** Old text
+  said "all below confidence floor 0.50" even when the count was zero.
+  (Surfaced by opus-deep-review.)
+
+## [0.7.0] - Unreleased
+
+### Added
+- **Multi-flavor vault adapters — Obsidian, Foam, Logseq, Dendron.**
+  Selectable via `KOSHI_VAULT_FLAVOR=obsidian|foam|logseq|dendron`
+  (default: `obsidian`, same as v0.6.x). The wire format (YAML
+  frontmatter, identity, all field semantics) is identical across
+  flavors; only file naming and placement differ so Koshi-managed
+  memories sit naturally alongside whatever PKM tool the team already
+  uses.
+- New layout adapters:
+  - **Obsidian** (default) — `<vault>/koshi/{facts,decisions,patterns,preferences}/<slug>--<id>.md`. Backwards-compatible with v0.6.x vaults.
+  - **Foam** — identical on-disk layout to Obsidian (Foam is built on
+    Obsidian-compatible markdown). Diagnostics report `foam` so it's
+    distinguishable in `koshi_health`.
+  - **Logseq** — `<vault>/pages/koshi-<type>-<slug>--<id>.md` (flat).
+    Lives in Logseq's idiomatic `pages/` dir; the `koshi-` prefix keeps
+    Koshi files from colliding with the user's own Logseq pages.
+  - **Dendron** — `<vault>/koshi.<type>.<slug>--<id>.md` at the vault
+    root, matching Dendron's dot-namespaced hierarchy convention.
+- `koshi_health` reports the active vault flavor (`obsidian`/`foam`/`logseq`/`dendron`).
+- File-system watcher (v0.6.1) is flavor-aware: the watch scope, filter,
+  and recursion mode come from the adapter, so Logseq/Dendron watchers
+  don't fire on every user page edit — only on Koshi-owned files.
+
+### Changed
+- `VaultBackend` now delegates file layout to `IVaultLayoutAdapter`
+  selected at construction (via env var by default). All existing
+  enumeration / target-path / dir-creation code paths route through
+  the adapter; the wire format is unchanged.
+- `koshi_memory_export_to_vault` and `koshi_memory_import_from_vault`
+  accept a new `flavor` parameter (default `obsidian`) so the target
+  / source vault's layout is chosen explicitly, independent of the
+  active `KOSHI_VAULT_FLAVOR` env var. Without this, a user running
+  with `KOSHI_VAULT_FLAVOR=logseq` who imported a real Obsidian vault
+  saw "no managed memories found" because the import scanned
+  `<vault>/pages/` instead of `<vault>/koshi/<type>/`.
+
+### Fixed (review-pass on PR #41)
+- **Test-isolation regression in `VaultBackendTests` and `VaultWatcherTests`.**
+  The 2-arg `VaultBackend(string, bool)` constructor (used by the
+  pre-flavor test classes) used to be Obsidian-hardcoded; this PR
+  rewired it to read `KOSHI_VAULT_FLAVOR`. The legacy tests hardcode
+  Obsidian paths and weren't guarding the env var, so a developer
+  with `KOSHI_VAULT_FLAVOR=dendron` set in their shell would see
+  every test in those classes fail. Plus a parallel-test race:
+  `VaultFlavorTests.ResolveFromEnv_reads_env_var` mutates the env
+  var mid-test, and xUnit ran the constructors in parallel. Fixed
+  by capturing/nulling/restoring the env var in both setups and
+  putting all three vault-touching test classes in the same xUnit
+  `[Collection("VaultEnvVar")]` so they serialize. (Surfaced by
+  sonnet-review.)
+- **`MemoryTools.GetStatus` was reading `_store.Backend` four times
+  in the same record initializer.** A hypothetical future swap (lazy
+  init, reconnect) could let `VaultWatcherStatus` and `VaultFlavor`
+  observe different instances and silently disagree on whether the
+  backend is a vault. Cached the property in a local. (Surfaced by
+  sonnet-review.)
+
+### Migration
+- Users on v0.6.x with the default Obsidian layout: **no action needed.**
+  The default flavor stays `obsidian` and the on-disk format is
+  byte-identical.
+- Users wanting to switch flavors: export from old vault, set
+  `KOSHI_VAULT_FLAVOR` to the new flavor, point `KOSHI_MEMORY_VAULT` at
+  a fresh directory, and run `koshi_memory_import_from_vault` from the
+  old vault. (Cross-flavor in-place migration is not automatic — keep
+  the old vault until you've verified the new one.)
+
+### Unknown-flavor handling
+- Setting `KOSHI_VAULT_FLAVOR` to an unrecognized value logs a single
+  stderr warning and falls back to `obsidian`. The server never fails
+  to start because of a bad flavor name.
+
+## [0.6.1] - Unreleased
+
+### Added
+- **Vault file-system watcher — hot-reload without per-call directory scans.**
+  When `KOSHI_MEMORY_VAULT` is set, Koshi now attaches a `FileSystemWatcher`
+  to `<vault>/koshi/**/*.md` and only reloads the in-memory cache when an
+  external change is observed (git pull, Obsidian edit, manual edit). The
+  v0.6.0 behavior was to rescan the whole directory tree on every tool call;
+  on large vaults this added ~10-50 ms of fixed latency per call. The watcher
+  reduces the steady-state cost to near zero while preserving correctness.
+- New env var `KOSHI_VAULT_WATCH` (`on`/`off`/`true`/`false`/`0`/`1`/etc.,
+  default `on`) for disabling the watcher when running over network mounts,
+  containers, or any FS that does not deliver inotify-style events
+  reliably. When disabled, Koshi falls back to v0.6.0 "reload on every call"
+  semantics — same correctness, slightly higher latency.
+- `koshi_health` reports the watcher status (`healthy` / `disabled` /
+  `unavailable`) when the active backend is a vault.
+
+### Changed
+- Internal: replaced `IMemoryBackend.RequiresReloadPerCall` (property) with
+  `IMemoryBackend.ShouldReload()` (method) so backends can return `false`
+  when their cache is known to be fresh. JSON backend unchanged (returns
+  `false` always); vault backend uses read-and-clear semantics on a dirty
+  bit set by the watcher callback.
+
+### Fixed
+- Transient `VaultBackend` instances created by `koshi_memory_export_to_vault`
+  / `koshi_memory_import_from_vault` no longer attach a file-system watcher
+  (they're disposed immediately after use); also explicitly disposed via
+  `try/finally`.
+
+## [0.6.0] - 2026-05-22
+
+### Added
+- **Vault-mode memory backend (`KOSHI_MEMORY_VAULT`) — share memories across teams via Git.**
+  Setting this env var to a directory makes Koshi store every memory as a
+  human-readable `.md` file with YAML frontmatter under
+  `<vault>/koshi/{facts,decisions,patterns,preferences}/`, instead of the
+  single opaque JSON envelope used by `KOSHI_MEMORY_FILE`. Memories are
+  Git-friendly (one file per memory → clean diffs, no merge storms),
+  Obsidian/Foam/Logseq-compatible, and editable in any text editor —
+  external edits, deletes, and Git pulls are picked up on the next tool
+  call without a server restart. See [`docs/vault-mode.md`](docs/vault-mode.md)
+  for the format spec and migration guide.
+- **Three new MCP tools for vault interop:**
+  - `koshi_memory_export_to_vault(vaultPath, overwrite)` — bulk-export the
+    current memory store to a vault directory.
+  - `koshi_memory_import_from_vault(vaultPath, mode)` — import memories
+    from a vault into the current backend. Modes: `merge` (keep current on
+    id collision), `overlay` (vault wins on id collision), `replace`
+    (destructive, full swap).
+  - `koshi_memory_sync_vault()` — force a fresh re-scan of the vault and
+    refresh the in-memory cache (no-op for the JSON backend).
+- **Unmanaged-note reporting.** Any `.md` file under `<vault>/koshi/` that
+  lacks a `koshi.id` in its frontmatter is reported in `koshi_memory_stats`
+  as an "unmanaged note" — surfaced but never auto-promoted into the memory
+  store and never overwritten.
+- **`koshi_memory_stats` now reports the active backend kind, location,
+  unmanaged-note count, and duplicate-id warning count** so users can see
+  at a glance whether the JSON or vault backend is active.
+- **`KOSHI_MEMORY_VAULT` added to `koshi_diagnostics` output** alongside the
+  other env vars.
+
+### Format (vault mode)
+- One `.md` file per memory at
+  `<vault>/koshi/<type>/<subject-slug>--<id>.md` (e.g.
+  `koshi/decisions/we-chose-dapper-over-ef--mem-000123.md`).
+- File identity is `koshi.id` from frontmatter — **filename is cosmetic**.
+  Subject rename → atomic move to new path + delete of old path; the id
+  follows the file.
+- Frontmatter stores: `id, type, scope.{user,workspace,thread}, source,
+  confidence, created-at, updated-at, last-accessed-at, access-count, tier`
+  (plus `superseded-by` / `contradiction-note` only when non-null).
+- **Derived fields (embeddings, compressed-content) are intentionally
+  omitted** from disk to avoid bloating Git diffs — they regenerate on
+  demand.
+- **Unknown top-level frontmatter keys** (your own `aliases:`, `cssclass:`,
+  `publish:`, etc.) are preserved verbatim on rewrite — Koshi only edits
+  the `koshi:` block.
+
+### Behaviour
+- When both `KOSHI_MEMORY_VAULT` and `KOSHI_MEMORY_FILE` are set, the vault
+  wins and a one-line stderr warning is emitted; `KOSHI_MEMORY_FILE` is
+  ignored.
+- Vault mode reloads from disk on **every tool call** — external deletes,
+  edits, and Git pulls take effect immediately without restart.
+- ID allocation re-scans the vault before allocating, so externally-added
+  memories can't collide with `mem-NNNNNN` ids generated in-process.
+- Duplicate `koshi.id` across two files (a possible Git-merge artifact) —
+  newer file mtime wins and a stderr warning is emitted; both files are
+  never loaded.
+- Atomic writes (temp file + `File.Move(overwrite:true)`) on every mutation;
+  half-written `.tmp` files left by a crash are ignored by subsequent loads.
+
+### Compatibility
+- **`KOSHI_MEMORY_FILE` behaviour is byte-identical to v0.5.1** when
+  `KOSHI_MEMORY_VAULT` is not set. Existing users see zero change.
+- The internal `MemoryPersistence` type was renamed to `JsonFileBackend` and
+  now implements a new internal `IMemoryBackend` interface (vault/json
+  swap-in). Public API surface is unchanged.
+
+### Tests
+- 65 new unit tests across `SlugTests`, `VaultDocumentTests`,
+  `VaultBackendTests`, `JsonFileBackendTests`, `MemoryStoreTests` —
+  including a cache-divergence regression guard that catches the bug where
+  an external file delete is masked by a stale in-process cache.
+- The smoke test gained a dedicated **vault-mode phase**: spawns a second
+  server process with `KOSHI_MEMORY_VAULT` set, exercises remember/recall/
+  external-edit/external-delete/unmanaged-note paths against the live MCP
+  protocol.
+
+### Not in scope (deferred to 0.6.1 / 0.7.0)
+- `FileSystemWatcher`-driven cache invalidation (deferred to 0.6.1) — vault
+  mode currently reloads on every tool call, which is correct but does a
+  directory scan per call. The watcher will let us skip the scan when the
+  cache is known fresh.
+- Logseq/Dendron file-layout adapters (deferred to 0.7.0). The current
+  layout is Obsidian-flavoured Markdown, which also works in Foam and
+  Logseq's "Markdown mode".
+
+### Added — project-root path defaults (2026-05-22 amendment)
+- **`KOSHI_PROJECT_ROOT` env var.** All Koshi path env vars now derive
+  sensible defaults from the project root. If you launch `koshi-mcp` from
+  `C:\OPP`, your memory and index land at `C:\OPP\.koshi\memory.json` and
+  `C:\OPP\.koshi\index.json` automatically — no configuration needed.
+- **Defaults table** (each env var still wins when set):
+
+  | Env var              | Unset default                       |
+  |----------------------|-------------------------------------|
+  | `KOSHI_PROJECT_ROOT` | `Environment.CurrentDirectory`      |
+  | `KOSHI_INDEX_FILE`   | `<root>/.koshi/index.json`          |
+  | `KOSHI_MEMORY_FILE`  | `<root>/.koshi/memory.json`         |
+  | `KOSHI_MEMORY_VAULT` | (null — vault stays opt-in)         |
+  | `KOSHI_INDEX_PATH`   | `<root>` (for `koshi_index_directory`<br/>and `koshi_diagnostics` display) |
+
+- **Relative paths in env values now resolve against `KOSHI_PROJECT_ROOT`.**
+  `KOSHI_MEMORY_VAULT=team-vault` resolves to `<root>/team-vault`. Absolute
+  paths are still used as-is. Whitespace-only values are treated as unset.
+- **Auto-index remains opt-in.** Setting `KOSHI_INDEX_PATH` is still the
+  signal that says "auto-index this directory on first search." We do *not*
+  auto-scan the project root by default — that would risk a slow first
+  search in large mono-repos. Users explicitly call `koshi_index_directory()`
+  (which now also defaults to the project root) or set `KOSHI_INDEX_PATH`.
+- **`koshi_health` (diagnostics) now shows the resolved value and source**
+  (`[env]` vs `[default]`) for every path. Easier to see exactly what's in
+  effect.
+- **Caveat for Claude Desktop users:** Claude Desktop typically launches
+  MCP servers with cwd=`%USERPROFILE%`, not your project. Set
+  `KOSHI_PROJECT_ROOT` explicitly in your `claude_desktop_config.json`:
+  ```json
+  "koshi": {
+    "command": "koshi-mcp",
+    "env": { "KOSHI_PROJECT_ROOT": "C:/your/project" }
+  }
+  ```
+  Copilot CLI and Cline launch servers with cwd=your project, so the
+  defaults Just Work there.
+- **Backwards-compatible.** Existing `v0.5.x` setups that set
+  `KOSHI_MEMORY_FILE`, `KOSHI_INDEX_FILE`, and/or `KOSHI_INDEX_PATH`
+  behave byte-identically. The defaults only kick in for paths you
+  *didn't* configure.
+
+### Changed
+- **`koshi_index_directory()` with no `path` argument now defaults to
+  the project root** instead of returning `"path is required"`. In
+  v0.5.x callers had to pass an explicit path (or set `KOSHI_INDEX_PATH`).
+  v0.6.0 indexes `<root>` when called with no args. This is an observable
+  behavior change but a strict improvement in usability — and you can
+  still pass any explicit `path` to scope the index narrower.
+
+### Safety
+- **`<root>/.koshi/.gitignore` is auto-seeded** when Koshi first uses
+  the default state directory. Contents: `*` plus `!.gitignore`, so
+  memory and index files don't get accidentally committed. We never
+  overwrite an existing `.gitignore` — power users who *want* to track
+  Koshi state in Git can delete or edit the file freely.
+- **Index snapshots are containment-checked.** With the default
+  `<root>/.koshi/index.json`, if a snapshot's source path is *outside*
+  `KOSHI_PROJECT_ROOT`, it is discarded with a stderr diagnostic
+  instead of silently serving foreign results. (Setting
+  `KOSHI_INDEX_PATH` explicitly skips this check — explicit user intent
+  wins.)
+- **Defensive Windows path handling.** Rooted-but-not-fully-qualified
+  paths like `\foo` (root-relative) and `C:foo` (drive-relative) used
+  to escape `KOSHI_PROJECT_ROOT` via `Path.IsPathRooted` + `Path.Combine`.
+  v0.6.0 switches to `IsPathFullyQualified` + `Path.Join`, which keeps
+  these contained under the project root.
+- **PathConfig static-init is fault-tolerant.** If env vars hold values
+  that `Path.GetFullPath` rejects (invalid characters, etc.), the
+  server logs a one-line warning and falls back to cwd-only defaults
+  instead of failing to start.
+
+### Quality (post-vault follow-ups, 2026-05-22)
+- **Shared `TokenCounters.Shared` accessor (#29).** Consolidates the two
+  duplicate `Lazy<TokenCounter>` fields that previously lived in
+  `RetrievalTools` and `ContextTools` into a single process-wide instance
+  under `Koshi.Core.Tokenization`. The new `KOSHI_TOKENIZER_MODEL` env
+  var selects the encoding for both call sites (default `gpt-4` →
+  cl100k_base; set to `gpt-4o` or `gpt-4o-mini` for o200k_base). The
+  active model is reported by `koshi_diagnostics`.
+- **Configurable chunker token sizes (#26).** `koshi_index` and
+  `koshi_index_directory` now accept optional `maxTokens` (64-2048,
+  default 512) and `overlapTokens` (0-256 and `< maxTokens/2`, default
+  50) parameters. Defaults can also be set globally via
+  `KOSHI_CHUNK_MAX_TOKENS` / `KOSHI_CHUNK_OVERLAP_TOKENS`. Out-of-range
+  values are clamped with a warning rather than rejected, and the
+  effective config is surfaced in the indexing response.
+- **Memory persistence is now discoverable (#30).** v0.6.0 already makes
+  persistence on by default at `<root>/.koshi/memory.json` (no env var
+  needed), and `koshi_memory_stats` already surfaces backend kind and
+  location at the top. This follow-up updates the `koshi_remember` tool
+  description to lead with the v0.6.0 default and adds a one-line stderr
+  nudge on Remember when persistence is genuinely disabled.
+- **Porter-style English stemmer for BM25 (#27).** `KeywordRetriever`
+  now stems both indexed terms and query terms with a built-in light
+  Porter-1980 implementation (`Koshi.Core.Tokenization.EnglishStemmer`).
+  Queries like `authentication` now match documents that say
+  `authenticate`, `authenticating`, `authenticated`, etc.
+  Opt out with `KOSHI_BM25_STEMMING=off` if your corpus is heavy on
+  exact-match codes / identifiers.
+- **Embedding provider plumbing — Phase 1 (#28).** Adds
+  `IEmbeddingProvider` interface and `EmbeddingProviderRegistry` in
+  `Koshi.Core.Retrieval` so optional adapter packages
+  (`Koshi.Embeddings.OpenAI`, `Koshi.Embeddings.Local`, etc.) can
+  register a provider at startup without bloating the AOT binary. The
+  default build ships no provider — BM25 keyword search remains the
+  sole retriever. `koshi_remember` now accepts an optional
+  `embedSelf: bool` parameter that populates the existing
+  `MemoryRecord.Embedding` field when a provider is configured (no-op
+  otherwise, with a one-line note in the response). `koshi_health`
+  reports the configured provider's model + dimensions.
+- **Multi-corpus retrieval (#23).** `koshi_index`, `koshi_index_directory`,
+  `koshi_search`, `koshi_list_indexed`, and `koshi_clear_index` now
+  accept an optional `corpus` parameter. The `default` corpus retains
+  the v0.6.0 single-corpus semantics (snapshot persistence,
+  auto-index, etc.); named corpora are in-memory only and live
+  side-by-side, letting agents query multiple repos without
+  thrashing snapshots. `koshi_clear_index(corpus="*")` clears every
+  corpus; `koshi_list_indexed(corpus=null)` lists all corpora;
+  `koshi_health` reports per-named-corpus stats.
+- **Stale CodeQL alerts cleared.** The 20 `useless-cast-to-self` alerts
+  in generated `System.Text.Json.SourceGeneration` files were filed
+  before `.github/codeql/codeql-config.yml` added `paths-ignore` for
+  `**/obj/**` + `**/*.g.cs`; they have been dismissed as "won't fix"
+  (analysis-target only).
+
 ## [0.5.1] - 2026-05-19
 
 ### Fixed

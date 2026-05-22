@@ -12,8 +12,9 @@ namespace Koshi.Mcp.Tools;
 [McpServerToolType]
 public sealed class ContextTools
 {
-    private static readonly Lazy<TokenCounter> _tokenCounter = new(() =>
-        TokenCounter.CreateAsync("gpt-4").GetAwaiter().GetResult());
+    // Token counter is shared with RetrievalTools via TokenCounters.Shared
+    // (Koshi.Core.Tokenization) — was a duplicate Lazy<TokenCounter> here
+    // before issue #29.
 
     [McpServerTool(Name = "koshi_compile_context"), Description(
         "Compile content into an optimally packed context window. " +
@@ -30,7 +31,7 @@ public sealed class ContextTools
         string strategy = "CacheOptimized")
     {
         if (tokenBudget < 1) tokenBudget = 8192;
-        var tokenCounter = _tokenCounter.Value;
+        var tokenCounter = TokenCounters.Shared;
         var posStrategy = Enum.TryParse<PositioningStrategy>(strategy, true, out var ps)
             ? ps : PositioningStrategy.CacheOptimized;
 
@@ -108,7 +109,7 @@ public sealed class ContextTools
     public static string CountTokens(
         [Description("The text to count tokens for")] string text)
     {
-        int count = _tokenCounter.Value.CountTokens(text);
+        int count = TokenCounters.Shared.CountTokens(text);
         return $"{count} tokens ({text.Length} characters, ratio: {(float)text.Length / count:F1} chars/token)";
     }
 
@@ -121,7 +122,7 @@ public sealed class ContextTools
         [Description("Team context text")] string? teamContext = null)
     {
         if (totalBudget < 1) totalBudget = 8192;
-        var tokenCounter = _tokenCounter.Value;
+        var tokenCounter = TokenCounters.Shared;
 
         int systemTokens = systemPrompt is not null ? tokenCounter.CountTokens(systemPrompt) : 0;
         int teamTokens = teamContext is not null ? tokenCounter.CountTokens(teamContext) : 0;
