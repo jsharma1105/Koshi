@@ -161,4 +161,109 @@ public sealed class DecisionExtractorTests
 
         Assert.Empty(DecisionExtractor.Extract(input));
     }
+
+    // ─── Opus deep-review fixes ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("We did NOT choose Dapper over EF Core because we hate performance.")]
+    [InlineData("We didn't choose Dapper over EF Core because of cost.")]
+    [InlineData("We did not pick Dapper over EF Core because the team is fluent in EF.")]
+    [InlineData("If we had chosen Dapper over EF Core because of speed, latency would drop.")]
+    [InlineData("Last week we should have chosen X over Y because of perf, but we didn't.")]
+    [InlineData("If only we could have decided to use Redis here.")]
+    [InlineData("Per the docs, you choose X over Y because of throughput.")]
+    [InlineData("According to the article, the team chose X over Y because of latency.")]
+    public void Extract_NegatedOrHypothetical_IsIgnored(string sentence)
+    {
+        // Negation / counterfactual / aspirational / quotation forms must not
+        // capture as a decision the team actually made. Without this filter
+        // these sentences match comparative-with-rationale at 0.9 and silently
+        // persist as Decision memories.
+        var result = DecisionExtractor.Extract(sentence);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void Extract_LogLineLookalike_IsIgnored()
+    {
+        // "Decision: 200 OK ..." — agent pastes a log fragment whose first
+        // token starts with "Decision:" but the tail is not English prose.
+        // The explicit-marker pattern now requires an English-looking tail
+        // (≥3 letters) so this no longer captures as a 0.95-confidence
+        // garbage Decision.
+        var input = "Decision: 200 OK was returned from the upstream service.";
+        var result = DecisionExtractor.Extract(input);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void Extract_BulletListSummary_ReturnsAllDecisions()
+    {
+        // Real-world agent summaries are usually bullet lists. Before the
+        // splitter fix, a multi-bullet list collapsed into one "sentence"
+        // and only the highest-confidence pattern survived — silently
+        // dropping the other decisions in the list.
+        var input =
+            "Today's outcome:\n" +
+            "- We chose retry-with-backoff over circuit-breaker because the dep recovers fast\n" +
+            "- Fixed by upgrading to 1.2.3\n" +
+            "- We decided to use Redis for the session cache";
+
+        var result = DecisionExtractor.Extract(input);
+
+        Assert.Equal(3, result.Count);
+        Assert.Contains(result, c => c.MatchedPattern == "comparative-with-rationale");
+        Assert.Contains(result, c => c.MatchedPattern == "resolution");
+        Assert.Contains(result, c => c.MatchedPattern == "first-person-decision");
+    }
+
+    [Fact]
+    public void Extract_NumberedListSummary_ReturnsAllDecisions()
+    {
+        // Same as bullet lists but with numbered markers.
+        var input =
+            "Outcomes:\n" +
+            "1. We chose Postgres over MySQL because of JSONB support and full text search\n" +
+            "2. Fixed by raising the connection pool to 50";
+
+        var result = DecisionExtractor.Extract(input);
+
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void Extract_BulletListSubject_StripsLeadingBulletMarker()
+    {
+        // When a bullet item is its own sentence the leading "- " must not
+        // appear in the derived subject. Otherwise the same decision written
+        // by two agents (one with a bullet, one without) dedupes as two
+        // distinct memories.
+        var withBullet = "- We chose Dapper over EF Core because the read path is hot.";
+        var withoutBullet = "We chose Dapper over EF Core because the read path is hot.";
+
+        var a = DecisionExtractor.Extract(withBullet);
+        var b = DecisionExtractor.Extract(withoutBullet);
+
+        Assert.Single(a);
+        Assert.Single(b);
+        Assert.Equal(b[0].Subject, a[0].Subject);
+        Assert.DoesNotContain("-", a[0].Subject[..1]);
+    }
+
+    [Fact]
+    public void Extract_CollapsesInternalWhitespaceInSubject()
+    {
+        // Two agents with the same decision but different whitespace
+        // (tabs / multiple spaces / line wrap) must produce identical
+        // subject strings so dedupe-at-write actually catches duplicates.
+        var clean = "We chose Dapper over EF Core because the read path is hot.";
+        var messy = "We   chose\tDapper  over\tEF Core  because the read   path is hot.";
+
+        var a = DecisionExtractor.Extract(clean);
+        var b = DecisionExtractor.Extract(messy);
+
+        Assert.Single(a);
+        Assert.Single(b);
+        Assert.Equal(a[0].Subject, b[0].Subject);
+    }
 }

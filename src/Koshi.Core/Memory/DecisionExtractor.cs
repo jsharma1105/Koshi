@@ -32,8 +32,10 @@ public static class DecisionExtractor
     // inside identifiers or URLs.
     private static readonly (Regex Pattern, float Confidence, string Name)[] _patterns =
     [
-        // "Decision: <text>" — explicit, strongest signal.
-        (new Regex(@"(?im)^\s*decision\s*:\s*\S",
+        // "Decision: <text>" — explicit, strongest signal. Require an
+        // English-looking tail (≥3 letters) so log lines like
+        // "Decision: 200 OK was returned ..." don't capture as 0.95 garbage.
+        (new Regex(@"(?im)^\s*decision\s*:\s*[A-Za-z]{3,}",
             RegexOptions.CultureInvariant | RegexOptions.Compiled), 0.95f, "explicit-marker"),
 
         // "<X> over <Y> because <Z>" — comparative with rationale.
@@ -53,15 +55,46 @@ public static class DecisionExtractor
             RegexOptions.CultureInvariant | RegexOptions.Compiled), 0.7f, "decided-to"),
     ];
 
-    // Sentence boundary on .!? followed by whitespace, OR blank-line gaps.
-    // The lookbehind keeps the terminator with the prior sentence so the
-    // "?" suffix check below works.
+    // Sentence boundary on .!? followed by whitespace, OR blank-line gaps,
+    // OR a newline followed by a list marker (-, •, *, 1., 1)). Real-world
+    // agent summaries are usually bullet lists, and without splitting on
+    // list markers a multi-bullet summary collapses into one "sentence"
+    // and only the highest-confidence pattern survives, silently dropping
+    // the other decisions in the list.
     private static readonly Regex _sentenceSplitter = new(
-        @"(?<=[.!?])\s+|(?:\r?\n){2,}",
+        @"(?<=[.!?])\s+|(?:\r?\n){2,}|(?:\r?\n)\s*(?:[\-•*]|\d+[.)])\s+",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex _decisionMarkerStrip = new(
         @"(?i)^\s*decision\s*:\s*",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // Negation / hypothetical / aspirational / quotation cues. When any of
+    // these is near the decision verb, the sentence is *not* expressing a
+    // decision the team made — it's a counterfactual ("if we had chosen X"),
+    // a regret ("we should have chosen X"), a denial ("we did NOT choose X"),
+    // or a reference to external prose ("per the docs, you choose X"). The
+    // comparative-with-rationale pattern would otherwise capture these as
+    // 0.9 confidence Decisions.
+    private static readonly Regex _negationOrHypothetical = new(
+        @"(?i)\b(?:did\s+not|didn'?t|do\s+not|don'?t|doesn'?t|won'?t|wouldn'?t|never|" +
+        @"not\s+(?:choose|chose|chosen|pick|picked|decide|decided|opt|opted)|" +
+        @"should\s+have|could\s+have|would\s+have|" +
+        @"if\s+(?:we|i|the\s+team|they|you)\s+(?:had|were|chose|choose|pick|picked|decide|decided)|" +
+        @"might\s+have|may\s+have|hypothetically|" +
+        @"per\s+the\s+docs?|the\s+docs?\s+say|the\s+article\s+says|" +
+        @"according\s+to)\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // Leading list-marker / bullet glyph at start of a sentence after splitting.
+    // The splitter break the line *at* the marker, but if it's at the very
+    // start of the input (no preceding newline) it survives.
+    private static readonly Regex _leadingBullet = new(
+        @"^\s*(?:[\-•*]|\d+[.)])\s+",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex _whitespaceRun = new(
+        @"\s+",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
@@ -76,7 +109,7 @@ public static class DecisionExtractor
 
         var sentences = _sentenceSplitter
             .Split(turnSummary)
-            .Select(s => s.Trim())
+            .Select(s => _leadingBullet.Replace(s.Trim(), ""))
             .Where(IsCandidateSentence);
 
         var candidates = new List<DecisionCandidate>();
@@ -107,12 +140,23 @@ public static class DecisionExtractor
         // future reader.
         if (sentence.Length < 20) return false;
         if (sentence.EndsWith('?')) return false;
+        // Reject negated / hypothetical / quotation forms. "We did NOT
+        // choose X over Y because of Z" matches comparative-with-rationale
+        // at 0.9 confidence, but it's a denial, not a decision.
+        if (_negationOrHypothetical.IsMatch(sentence)) return false;
         return true;
     }
 
     private static string DeriveSubject(string sentence)
     {
-        var clean = _decisionMarkerStrip.Replace(sentence, "").TrimEnd('.', ',', ';', ' ');
+        // Order matters: strip the leading bullet/list marker that the
+        // splitter may have left in place, then strip an explicit
+        // "Decision:" prefix, then collapse runs of internal whitespace
+        // so two agents writing the same decision with different
+        // whitespace produce identical subject strings (dedupe stability).
+        var clean = _leadingBullet.Replace(sentence, "");
+        clean = _decisionMarkerStrip.Replace(clean, "");
+        clean = _whitespaceRun.Replace(clean, " ").TrimEnd('.', ',', ';', ' ');
         const int maxSubjectLength = 80;
         if (clean.Length <= maxSubjectLength) return clean;
         return clean[..maxSubjectLength].TrimEnd() + "...";

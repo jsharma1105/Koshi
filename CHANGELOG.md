@@ -43,6 +43,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regression" workflow. Pairs with the upcoming #45 (supersession) and
   #44 (similarity dedupe).
 
+### Fixed (review-pass on PR #47)
+- **Negation/hypothetical sentences no longer auto-capture.** Sentences
+  like "We did NOT choose Dapper over EF Core because of cost", "If we
+  had chosen X over Y", "Per the docs, you choose X over Y" previously
+  matched the comparative-with-rationale pattern at 0.9 and silently
+  persisted as Decision memories. They are now filtered upstream by
+  `IsCandidateSentence`. (Surfaced by opus-deep-review.)
+- **Bullet-list summaries now extract every decision instead of one.**
+  Real-world agent summaries are usually multi-bullet markdown lists;
+  the sentence splitter was treating them as one sentence and dropping
+  every decision except the highest-confidence one. The splitter now
+  breaks on `\n -`, `\n *`, `\n •`, `\n 1.`, `\n 1)` in addition to
+  sentence terminators and blank-line gaps. (Surfaced by opus-deep-review.)
+- **`Decision: <log-like-tail>` no longer captures as 0.95-confidence
+  garbage.** The explicit-marker pattern now requires an English-looking
+  tail (≥3 alpha characters), so log-fragment summaries like
+  `Decision: 200 OK was returned ...` no longer slip through.
+  (Surfaced by opus-deep-review.)
+- **Subject normalization: leading bullet markers stripped, internal
+  whitespace collapsed.** Two agents writing the same decision with
+  different whitespace or one prefixed with `- ` now produce identical
+  subject strings, so subject-exact-match dedupe actually catches
+  duplicates instead of letting near-twins through. (Surfaced by
+  opus-deep-review.)
+- **Capture dedupe now matches the full memory scope (UserId,
+  WorkspaceId, ThreadId), not just WorkspaceId.** One user's capture
+  could previously suppress another user's identical-subject capture
+  in the same workspace; thread-scoped captures couldn't coexist with
+  workspace-scoped ones. (Surfaced by codex-cross-review.)
+- **`No decision-shape sentences detected` message is no longer
+  misleading when the extractor returned zero candidates.** Old text
+  said "all below confidence floor 0.50" even when the count was zero.
+  (Surfaced by opus-deep-review.)
+
 ## [0.7.0] - Unreleased
 
 ### Added

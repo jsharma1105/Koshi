@@ -554,8 +554,11 @@ public sealed class MemoryTools
 
         if (candidates.Count == 0)
         {
+            var diagnostic = allCandidates.Count == 0
+                ? "extractor found no decision-shape sentences"
+                : $"extractor found {allCandidates.Count} weak match(es), all below confidence floor {min_confidence:F2}";
             return "ℹ No decision-shape sentences detected in the turn summary " +
-                   $"(extractor found {allCandidates.Count} weak match(es), all below confidence floor {min_confidence:F2}). " +
+                   $"({diagnostic}). " +
                    "Either no decisions were made, or rephrase explicitly — e.g., " +
                    "\"Decision: ...\", \"We chose X over Y because Z\", \"Fixed by ...\".";
         }
@@ -596,10 +599,19 @@ public sealed class MemoryTools
                     break;
                 }
 
+                // Dedupe key includes the full scope (UserId, WorkspaceId,
+                // ThreadId) so one user's capture never suppresses another
+                // user's identical-subject capture in the same workspace,
+                // and a thread-scoped capture is distinct from the same
+                // subject captured at the workspace level. Type and Subject
+                // are matched case-insensitively (Subject is normalized
+                // upstream by DecisionExtractor.DeriveSubject).
                 var dupe = memories.FirstOrDefault(m =>
                     m.Type == MemoryType.Decision &&
                     string.Equals(m.Subject, cand.Subject, StringComparison.OrdinalIgnoreCase) &&
-                    m.Scope.WorkspaceId == scope.WorkspaceId);
+                    string.Equals(m.Scope.UserId, scope.UserId, StringComparison.Ordinal) &&
+                    string.Equals(m.Scope.WorkspaceId, scope.WorkspaceId, StringComparison.Ordinal) &&
+                    string.Equals(m.Scope.ThreadId, scope.ThreadId, StringComparison.Ordinal));
                 if (dupe is not null)
                 {
                     skipped.Add((cand.Subject, $"duplicate of {dupe.Id}"));
