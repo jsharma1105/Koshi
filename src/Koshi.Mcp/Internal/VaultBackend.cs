@@ -295,9 +295,9 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             return cached;
 
         // Cache miss (or stale) — scan the layout's owned files once.
-        foreach (var path in Layout.EnumerateOwnedFiles(Root))
+        foreach (var path in Layout.EnumerateOwnedFiles(Root)
+            .Where(p => !p.EndsWith(".tmp", StringComparison.Ordinal)))
         {
-            if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
             var parsed = VaultDocument.Read(path);
             if (parsed is not null && parsed.Record.Id == id)
             {
