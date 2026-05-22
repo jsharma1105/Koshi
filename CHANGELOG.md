@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selected at construction (via env var by default). All existing
   enumeration / target-path / dir-creation code paths route through
   the adapter; the wire format is unchanged.
+- `koshi_memory_export_to_vault` and `koshi_memory_import_from_vault`
+  accept a new `flavor` parameter (default `obsidian`) so the target
+  / source vault's layout is chosen explicitly, independent of the
+  active `KOSHI_VAULT_FLAVOR` env var. Without this, a user running
+  with `KOSHI_VAULT_FLAVOR=logseq` who imported a real Obsidian vault
+  saw "no managed memories found" because the import scanned
+  `<vault>/pages/` instead of `<vault>/koshi/<type>/`.
 
 ### Migration
 - Users on v0.6.x with the default Obsidian layout: **no action needed.**

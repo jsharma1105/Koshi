@@ -396,20 +396,24 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_export_to_vault"), Description(
-        "Bulk-export current memories as Obsidian-style Markdown files into <vaultPath>/koshi/. " +
+        "Bulk-export current memories as Markdown files into the target vault. " +
+        "Defaults to Obsidian layout (<vaultPath>/koshi/<type>/), independent of the active " +
+        "KOSHI_VAULT_FLAVOR env var. Override via flavor=obsidian|foam|logseq|dendron. " +
         "By default refuses to write into a non-empty vault. Pass overwrite=true to replace " +
         "existing koshi-tagged files in the target vault (user notes without koshi.id are never touched).")]
     public static string ExportToVault(
         [Description("Path to the target vault directory")] string vaultPath,
-        [Description("If true, replace existing koshi-tagged files in the vault")] bool overwrite = false)
+        [Description("If true, replace existing koshi-tagged files in the vault")] bool overwrite = false,
+        [Description("Layout flavor for the target vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian")
     {
         if (string.IsNullOrWhiteSpace(vaultPath))
             return "❌ vaultPath must not be empty.";
 
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
+        var layout = VaultLayout.Resolve(flavor);
 
         VaultBackend target;
-        try { target = new VaultBackend(resolved, watch: false); }
+        try { target = new VaultBackend(resolved, watch: false, layout: layout); }
         catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
         try
@@ -427,13 +431,16 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
-        "Import memories from an Obsidian-style vault into the current backend. " +
+        "Import memories from a Markdown vault into the current backend. " +
+        "Defaults to Obsidian layout, independent of the active KOSHI_VAULT_FLAVOR env var. " +
+        "Override via flavor=obsidian|foam|logseq|dendron to match the source vault's layout. " +
         "mode='merge' (default): id collisions keep current memory. " +
         "mode='overlay': id collisions, vault wins. " +
         "mode='replace': drop all current memories, take vault as-is.")]
     public static string ImportFromVault(
         [Description("Path to the source vault directory")] string vaultPath,
-        [Description("Conflict resolution mode: merge | overlay | replace")] string mode = "merge")
+        [Description("Conflict resolution mode: merge | overlay | replace")] string mode = "merge",
+        [Description("Layout flavor for the source vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian")
     {
         if (string.IsNullOrWhiteSpace(vaultPath))
             return "❌ vaultPath must not be empty.";
@@ -442,9 +449,10 @@ public sealed class MemoryTools
             return "❌ mode must be one of: merge, overlay, replace.";
 
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
+        var layout = VaultLayout.Resolve(flavor);
 
         VaultBackend source;
-        try { source = new VaultBackend(resolved, watch: false); }
+        try { source = new VaultBackend(resolved, watch: false, layout: layout); }
         catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
         try

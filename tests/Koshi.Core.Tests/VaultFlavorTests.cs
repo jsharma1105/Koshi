@@ -336,4 +336,56 @@ public class VaultFlavorTests : IDisposable
         Assert.False(spec.Value.recursive);
         Assert.Equal("koshi.*.md", spec.Value.filter);
     }
+
+    // ─── Explicit flavor overrides env var ─────────────────────────────
+    //
+    // koshi_memory_export_to_vault and koshi_memory_import_from_vault accept
+    // an explicit `flavor` parameter (default "obsidian") so they are not
+    // coupled to KOSHI_VAULT_FLAVOR — e.g. a logseq user importing a real
+    // obsidian vault still works. These tests verify the resolution contract
+    // those tools depend on.
+
+    [Fact]
+    public void Explicit_layout_wins_over_env_var()
+    {
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, "logseq");
+
+        // Tools pass VaultLayout.Resolve(flavor) explicitly, so the env var
+        // should not affect the layout chosen.
+        var layout = VaultLayout.Resolve("obsidian");
+        Assert.Equal("obsidian", layout.FlavorName);
+
+        using var be = new VaultBackend(_vault, watch: false, layout);
+        be.Upsert(Make("mem-000001", MemoryType.Fact, "explicit wins"), []);
+
+        // Wrote to obsidian's koshi/facts/ dir even though env says logseq.
+        var expected = Path.Combine(_vault, "koshi", "facts", "explicit-wins--mem-000001.md");
+        Assert.True(File.Exists(expected), $"Expected obsidian-layout file at: {expected}");
+        Assert.False(Directory.Exists(Path.Combine(_vault, "pages")),
+            "logseq's pages/ dir must not be created when explicit layout is obsidian.");
+    }
+
+    [Fact]
+    public void Import_with_obsidian_default_reads_obsidian_vault_under_logseq_env()
+    {
+        // Simulate: user has KOSHI_VAULT_FLAVOR=logseq set globally, but they
+        // are importing a real obsidian-formatted vault. The import tool
+        // defaults flavor="obsidian", so it must succeed.
+        using (var writer = new VaultBackend(_vault, watch: false, new ObsidianLayout()))
+        {
+            writer.Upsert(Make("mem-000001", MemoryType.Decision, "obsidian decision"), []);
+            writer.Upsert(Make("mem-000002", MemoryType.Fact, "obsidian fact"), []);
+        }
+
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, "logseq");
+
+        // Mirror what ImportFromVault does internally with flavor="obsidian".
+        var explicitLayout = VaultLayout.Resolve("obsidian");
+        using var reader = new VaultBackend(_vault, watch: false, explicitLayout);
+        var loaded = reader.LoadAll();
+
+        Assert.Equal(2, loaded.Count);
+        Assert.Contains(loaded, m => m.Id == "mem-000001");
+        Assert.Contains(loaded, m => m.Id == "mem-000002");
+    }
 }
