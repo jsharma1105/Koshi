@@ -69,6 +69,7 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    KOSHI_INDEX_FILE:   {paths.IndexFile}  [{PathConfig.SourceLabel(paths.IndexFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_MEMORY_FILE:  {paths.MemoryFile}  [{PathConfig.SourceLabel(paths.MemoryFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_MEMORY_VAULT: {paths.MemoryVault ?? "(unset)"}  [{(paths.MemoryVaultFromEnv ? "env" : "default")}]");
+        sb.AppendLine($"    KOSHI_TOKENIZER_MODEL: {Koshi.Core.Tokenization.TokenCounters.ModelName}");
         sb.AppendLine();
 
         var uptime = DateTimeOffset.UtcNow - _startedAt;

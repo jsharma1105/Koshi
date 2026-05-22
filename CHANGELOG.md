@@ -166,6 +166,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server logs a one-line warning and falls back to cwd-only defaults
   instead of failing to start.
 
+### Quality (post-vault follow-ups, 2026-05-22)
+- **Shared `TokenCounters.Shared` accessor (#29).** Consolidates the two
+  duplicate `Lazy<TokenCounter>` fields that previously lived in
+  `RetrievalTools` and `ContextTools` into a single process-wide instance
+  under `Koshi.Core.Tokenization`. The new `KOSHI_TOKENIZER_MODEL` env
+  var selects the encoding for both call sites (default `gpt-4` →
+  cl100k_base; set to `gpt-4o` or `gpt-4o-mini` for o200k_base). The
+  active model is reported by `koshi_diagnostics`.
+- **Configurable chunker token sizes (#26).** `koshi_index` and
+  `koshi_index_directory` now accept optional `maxTokens` (64-2048,
+  default 512) and `overlapTokens` (0-256 and `< maxTokens/2`, default
+  50) parameters. Defaults can also be set globally via
+  `KOSHI_CHUNK_MAX_TOKENS` / `KOSHI_CHUNK_OVERLAP_TOKENS`. Out-of-range
+  values are clamped with a warning rather than rejected, and the
+  effective config is surfaced in the indexing response.
+- **Stale CodeQL alerts cleared.** The 20 `useless-cast-to-self` alerts
+  in generated `System.Text.Json.SourceGeneration` files were filed
+  before `.github/codeql/codeql-config.yml` added `paths-ignore` for
+  `**/obj/**` + `**/*.g.cs`; they have been dismissed as "won't fix"
+  (analysis-target only).
+
 ## [0.5.1] - 2026-05-19
 
 ### Fixed

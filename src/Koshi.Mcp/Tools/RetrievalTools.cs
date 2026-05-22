@@ -22,8 +22,11 @@ public sealed class RetrievalTools
     private const int DefaultPreviewChars = 500;
 
     private static readonly Lock _lock = new();
-    private static readonly Lazy<TokenCounter> _tokenCounter = new(() =>
-        TokenCounter.CreateAsync("gpt-4").GetAwaiter().GetResult());
+
+    // Token counter: was a per-class Lazy<TokenCounter> (cl100k_base ~20 MB).
+    // Issue #29 — moved to Koshi.Core.Tokenization.TokenCounters.Shared so
+    // RetrievalTools + ContextTools share a single instance and a single env
+    // var (KOSHI_TOKENIZER_MODEL) selects the encoding for both.
 
     private static readonly IndexPersistence _persistence;
 
@@ -56,7 +59,11 @@ public sealed class RetrievalTools
         "For indexing files on disk, use koshi_index_directory instead.")]
     public static string Index(
         [Description("JSON array of documents: [{\"content\": \"...\", \"source\": \"filename.md\", \"type\": \"documentation\"}]")]
-        string documents)
+        string documents,
+        [Description("Optional chunker max tokens per chunk (default 512, range 64-2048). Falls back to KOSHI_CHUNK_MAX_TOKENS env var.")]
+        int? maxTokens = null,
+        [Description("Optional chunker overlap between chunks (default 50, range 0-256, must be < maxTokens/2). Falls back to KOSHI_CHUNK_OVERLAP_TOKENS env var.")]
+        int? overlapTokens = null)
     {
         List<DocInput>? docs;
         try
@@ -71,7 +78,8 @@ public sealed class RetrievalTools
         if (docs is null || docs.Count == 0)
             return "❌ No documents provided.";
 
-        var chunker = new FixedSizeChunker(_tokenCounter.Value, maxTokens: 512, overlapTokens: 50);
+        var cfg = ChunkerConfig.Resolve(maxTokens, overlapTokens);
+        var chunker = new FixedSizeChunker(TokenCounters.Shared, cfg.MaxTokens, cfg.OverlapTokens);
         var allChunks = new List<Chunk>();
 
         foreach (var doc in docs)
@@ -84,7 +92,10 @@ public sealed class RetrievalTools
             return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Reduce document count or size.";
 
         ReplaceIndex(allChunks, source: ContentFingerprint.InMemorySource, enumeration: null);
-        return $"✅ Indexed {docs.Count} documents → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens)";
+
+        var msg = $"✅ Indexed {docs.Count} documents → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens) — {cfg.Describe()}";
+        if (cfg.Warning is not null) msg += $"\n   ⚠ {cfg.Warning}";
+        return msg;
     }
 
     [McpServerTool(Name = "koshi_index_directory"), Description(
@@ -101,7 +112,11 @@ public sealed class RetrievalTools
         [Description("Glob pattern to filter files (e.g. '*.md'). If empty, all supported text file types are indexed.")]
         string? pattern = null,
         [Description("Maximum file size in KB to index (default: 256)")] int maxFileSizeKb = DefaultMaxFileSizeKb,
-        [Description("Maximum number of files to index (default: 5000)")] int maxFiles = DefaultMaxFiles)
+        [Description("Maximum number of files to index (default: 5000)")] int maxFiles = DefaultMaxFiles,
+        [Description("Optional chunker max tokens per chunk (default 512, range 64-2048). Falls back to KOSHI_CHUNK_MAX_TOKENS env var. Recommended: 1024 for JSON-heavy directories, 512 for code/prose, 256 for short docs.")]
+        int? maxTokens = null,
+        [Description("Optional chunker overlap between chunks (default 50, range 0-256, must be < maxTokens/2). Falls back to KOSHI_CHUNK_OVERLAP_TOKENS env var.")]
+        int? overlapTokens = null)
     {
         var dirPath = ResolveIndexPath(path);
         if (dirPath is null)
@@ -142,7 +157,8 @@ public sealed class RetrievalTools
         if (fileList.Count == 0)
             return $"❌ No supported, readable files found in: {dirPath}";
 
-        var chunker = new FixedSizeChunker(_tokenCounter.Value, maxTokens: 512, overlapTokens: 50);
+        var chunkerCfg = ChunkerConfig.Resolve(maxTokens, overlapTokens);
+        var chunker = new FixedSizeChunker(TokenCounters.Shared, chunkerCfg.MaxTokens, chunkerCfg.OverlapTokens);
         var allChunks = new List<Chunk>(capacity: fileList.Count * 4);
         int skipped = 0;
 
@@ -172,7 +188,8 @@ public sealed class RetrievalTools
 
         ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration);
 
-        var msg = $"✅ Indexed {fileList.Count - skipped} files from '{dirPath}' → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens)";
+        var msg = $"✅ Indexed {fileList.Count - skipped} files from '{dirPath}' → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens) — {chunkerCfg.Describe()}";
+        if (chunkerCfg.Warning is not null) msg += $"\n   ⚠ {chunkerCfg.Warning}";
         if (skipped > 0) msg += $" ({skipped} skipped)";
         if (_persistence.IsEnabled) msg += $"\n   Snapshot saved → {_persistence.Path}";
         return msg;
