@@ -1,3 +1,4 @@
+using System.Security;
 using System.Text.Json;
 using Koshi.Core.Memory;
 
@@ -43,7 +44,9 @@ internal sealed class JsonFileBackend : IMemoryBackend
             var envelope = JsonSerializer.Deserialize(json, KoshiJsonContext.Default.PersistenceEnvelope);
             return envelope?.Memories ?? [];
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or JsonException or NotSupportedException)
         {
             Console.Error.WriteLine($"[koshi] Failed to load memory file '{Path}': {ex.Message}");
             return [];
@@ -87,7 +90,9 @@ internal sealed class JsonFileBackend : IMemoryBackend
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, Path, overwrite: true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or JsonException or NotSupportedException or PathTooLongException)
         {
             Console.Error.WriteLine($"[koshi] Failed to save memory file '{Path}': {ex.Message}");
         }
