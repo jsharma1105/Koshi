@@ -94,6 +94,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layout is Obsidian-flavoured Markdown, which also works in Foam and
   Logseq's "Markdown mode".
 
+### Added — project-root path defaults (2026-05-22 amendment)
+- **`KOSHI_PROJECT_ROOT` env var.** All Koshi path env vars now derive
+  sensible defaults from the project root. If you launch `koshi-mcp` from
+  `C:\OPP`, your memory and index land at `C:\OPP\.koshi\memory.json` and
+  `C:\OPP\.koshi\index.json` automatically — no configuration needed.
+- **Defaults table** (each env var still wins when set):
+
+  | Env var              | Unset default                       |
+  |----------------------|-------------------------------------|
+  | `KOSHI_PROJECT_ROOT` | `Environment.CurrentDirectory`      |
+  | `KOSHI_INDEX_FILE`   | `<root>/.koshi/index.json`          |
+  | `KOSHI_MEMORY_FILE`  | `<root>/.koshi/memory.json`         |
+  | `KOSHI_MEMORY_VAULT` | (null — vault stays opt-in)         |
+  | `KOSHI_INDEX_PATH`   | `<root>` (for `koshi_index_directory`<br/>and `koshi_diagnostics` display) |
+
+- **Relative paths in env values now resolve against `KOSHI_PROJECT_ROOT`.**
+  `KOSHI_MEMORY_VAULT=team-vault` resolves to `<root>/team-vault`. Absolute
+  paths are still used as-is. Whitespace-only values are treated as unset.
+- **Auto-index remains opt-in.** Setting `KOSHI_INDEX_PATH` is still the
+  signal that says "auto-index this directory on first search." We do *not*
+  auto-scan the project root by default — that would risk a slow first
+  search in large mono-repos. Users explicitly call `koshi_index_directory()`
+  (which now also defaults to the project root) or set `KOSHI_INDEX_PATH`.
+- **`koshi_health` (diagnostics) now shows the resolved value and source**
+  (`[env]` vs `[default]`) for every path. Easier to see exactly what's in
+  effect.
+- **Caveat for Claude Desktop users:** Claude Desktop typically launches
+  MCP servers with cwd=`%USERPROFILE%`, not your project. Set
+  `KOSHI_PROJECT_ROOT` explicitly in your `claude_desktop_config.json`:
+  ```json
+  "koshi": {
+    "command": "koshi-mcp",
+    "env": { "KOSHI_PROJECT_ROOT": "C:/your/project" }
+  }
+  ```
+  Copilot CLI and Cline launch servers with cwd=your project, so the
+  defaults Just Work there.
+- **Backwards-compatible.** Existing `v0.5.x` setups that set
+  `KOSHI_MEMORY_FILE`, `KOSHI_INDEX_FILE`, and/or `KOSHI_INDEX_PATH`
+  behave byte-identically. The defaults only kick in for paths you
+  *didn't* configure.
+
+### Changed
+- **`koshi_index_directory()` with no `path` argument now defaults to
+  the project root** instead of returning `"path is required"`. In
+  v0.5.x callers had to pass an explicit path (or set `KOSHI_INDEX_PATH`).
+  v0.6.0 indexes `<root>` when called with no args. This is an observable
+  behavior change but a strict improvement in usability — and you can
+  still pass any explicit `path` to scope the index narrower.
+
+### Safety
+- **`<root>/.koshi/.gitignore` is auto-seeded** when Koshi first uses
+  the default state directory. Contents: `*` plus `!.gitignore`, so
+  memory and index files don't get accidentally committed. We never
+  overwrite an existing `.gitignore` — power users who *want* to track
+  Koshi state in Git can delete or edit the file freely.
+- **Index snapshots are containment-checked.** With the default
+  `<root>/.koshi/index.json`, if a snapshot's source path is *outside*
+  `KOSHI_PROJECT_ROOT`, it is discarded with a stderr diagnostic
+  instead of silently serving foreign results. (Setting
+  `KOSHI_INDEX_PATH` explicitly skips this check — explicit user intent
+  wins.)
+- **Defensive Windows path handling.** Rooted-but-not-fully-qualified
+  paths like `\foo` (root-relative) and `C:foo` (drive-relative) used
+  to escape `KOSHI_PROJECT_ROOT` via `Path.IsPathRooted` + `Path.Combine`.
+  v0.6.0 switches to `IsPathFullyQualified` + `Path.Join`, which keeps
+  these contained under the project root.
+- **PathConfig static-init is fault-tolerant.** If env vars hold values
+  that `Path.GetFullPath` rejects (invalid characters, etc.), the
+  server logs a one-line warning and falls back to cwd-only defaults
+  instead of failing to start.
+
 ## [0.5.1] - 2026-05-19
 
 ### Fixed

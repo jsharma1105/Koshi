@@ -81,6 +81,29 @@ chmod +x koshi-mcp
 ./koshi-mcp            # speaks MCP over stdio
 ```
 
+### Project-root defaults (since v0.6.0)
+
+Koshi writes its memory and index under `<project>/.koshi/` by default — the
+project root is whatever directory the MCP server was launched from. Open
+Copilot CLI in `C:\OPP`, install Koshi, and your data lives at
+`C:\OPP\.koshi\memory.json` automatically. No env vars required for the
+common case.
+
+Override any path with the matching env var (see the [MCP server
+reference](src/Koshi.Mcp/README.md#configuration) for the full table).
+Relative env values resolve against `KOSHI_PROJECT_ROOT`. Run `koshi_health`
+to see the resolved value + source for every path.
+
+A `<root>/.koshi/.gitignore` is auto-created the first time Koshi writes
+state under the default directory, so your memories and index don't get
+committed by accident. Delete or edit it if you intentionally want to
+track Koshi state in Git — we'll never overwrite it.
+
+> ⚠️ **Claude Desktop:** launches MCP servers with cwd=`%USERPROFILE%`,
+> not your project. Set `KOSHI_PROJECT_ROOT` explicitly in your
+> `claude_desktop_config.json`. Copilot CLI and Cline launch servers with
+> cwd=your project, so the defaults Just Work there.
+
 ## Why you'd use this instead of writing it yourself
 
 - **It's done.** 20 tools, 89 unit tests, .NET 10, MIT.

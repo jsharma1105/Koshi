@@ -24,22 +24,33 @@ public sealed class MemoryTools
 
     static MemoryTools()
     {
-        var vaultPath = Environment.GetEnvironmentVariable("KOSHI_MEMORY_VAULT");
-        var filePath = Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE");
+        var paths = PathConfig.Default;
 
         IMemoryBackend backend;
-        if (!string.IsNullOrWhiteSpace(vaultPath))
+        if (paths.MemoryVault is not null)
         {
-            if (!string.IsNullOrWhiteSpace(filePath))
+            // Vault is opt-in. If KOSHI_MEMORY_FILE was also set explicitly,
+            // warn that vault wins — defaults never trigger this warning
+            // because vault has no default.
+            if (paths.MemoryFileFromEnv)
                 Console.Error.WriteLine(
                     "[koshi] Both KOSHI_MEMORY_VAULT and KOSHI_MEMORY_FILE are set; vault takes precedence.");
-            backend = new VaultBackend(vaultPath);
+            backend = new VaultBackend(paths.MemoryVault);
         }
         else
         {
-            backend = new JsonFileBackend(filePath);
+            // JSON backend: persistence is now ALWAYS on (defaults to
+            // <project>/.koshi/memory.json) — pass the resolved path so the
+            // backend writes there. Pass null only if the resolved path is
+            // somehow blank, which the resolver guarantees it isn't.
+            backend = new JsonFileBackend(paths.MemoryFile);
         }
         _store = new MemoryStore(backend);
+
+        // Drop <root>/.koshi/.gitignore so memory + index files don't get
+        // accidentally committed when Koshi is using the default state dir.
+        // Best-effort, never throws.
+        paths.EnsureStateDirGitIgnore();
     }
 
     [McpServerTool(Name = "koshi_remember"), Description(
@@ -355,9 +366,11 @@ public sealed class MemoryTools
         if (string.IsNullOrWhiteSpace(vaultPath))
             return "❌ vaultPath must not be empty.";
 
+        var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
+
         VaultBackend target;
-        try { target = new VaultBackend(vaultPath); }
-        catch (Exception ex) { return $"❌ Could not open vault '{vaultPath}': {ex.Message}"; }
+        try { target = new VaultBackend(resolved); }
+        catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
         var existing = target.LoadAll();
         if (existing.Count > 0 && !overwrite)
@@ -384,9 +397,11 @@ public sealed class MemoryTools
         if (modeNorm is not ("merge" or "overlay" or "replace"))
             return "❌ mode must be one of: merge, overlay, replace.";
 
+        var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
+
         VaultBackend source;
-        try { source = new VaultBackend(vaultPath); }
-        catch (Exception ex) { return $"❌ Could not open vault '{vaultPath}': {ex.Message}"; }
+        try { source = new VaultBackend(resolved); }
+        catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
         var incoming = source.LoadAll();
         if (incoming.Count == 0)

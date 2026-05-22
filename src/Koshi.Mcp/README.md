@@ -286,12 +286,19 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 
 Koshi is configured exclusively through **environment variables** (no config files, no flags) — easy to set in any MCP client config.
 
+Since v0.6.0 every path env var **derives a sensible default from the project root**, so most users never need to set anything. If you launch `koshi-mcp` from `C:\OPP`, your memory and index land at `C:\OPP\.koshi\memory.json` and `C:\OPP\.koshi\index.json` automatically.
+
+> ⚠️ **Claude Desktop caveat:** Claude Desktop typically launches MCP servers with cwd=`%USERPROFILE%`, not your project. Set `KOSHI_PROJECT_ROOT` explicitly in your `claude_desktop_config.json` (e.g. `"KOSHI_PROJECT_ROOT": "C:/your/project"`). Copilot CLI and Cline launch servers with cwd=your project, so defaults Just Work there.
+
 | Env var | Default | Purpose |
 |---------|---------|---------|
-| `KOSHI_INDEX_PATH` | _(unset)_ | Absolute path that `koshi_search` will auto-index on first use. Without this, callers must invoke `koshi_index_directory` explicitly. |
-| `KOSHI_INDEX_FILE` | _(unset)_ | Absolute path to a JSON file used to persist the BM25 retrieval index across server restarts. On startup the snapshot is auto-loaded and validated against the live filesystem (`relpath + size + mtime` fingerprint); stale snapshots are discarded and a re-index runs. Atomic writes, schema-versioned. When unset, the index lives only for the current process and a re-chunk pass runs on every restart. |
-| `KOSHI_MEMORY_FILE` | _(unset)_ | Absolute path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. When unset, memories live only for the current process. **Ignored when `KOSHI_MEMORY_VAULT` is also set** (a one-line stderr warning is emitted). |
-| `KOSHI_MEMORY_VAULT` | _(unset)_ | Absolute path to a directory used to persist memories as **one Markdown file per memory** under `<vault>/koshi/<type>/`. Git-friendly, Obsidian-compatible. External edits/deletes are picked up on the next tool call without a restart. See [docs/vault-mode.md](../../docs/vault-mode.md) for the full format spec and migration guide. |
+| `KOSHI_PROJECT_ROOT` | `Environment.CurrentDirectory` | Base for all derived paths below. Relative env values resolve against this. |
+| `KOSHI_INDEX_PATH` | `<root>` | Absolute path that `koshi_search` will auto-index on first use. **Auto-index is opt-in** — only set this when you want the first `koshi_search` call to scan the directory automatically. When unset, `koshi_search` requires an explicit `koshi_index_directory(path)` first. |
+| `KOSHI_INDEX_FILE` | `<root>/.koshi/index.json` | Path to a JSON file used to persist the BM25 retrieval index across server restarts. On startup the snapshot is auto-loaded and validated against the live filesystem (`relpath + size + mtime` fingerprint); stale snapshots are discarded and a re-index runs. Atomic writes, schema-versioned. |
+| `KOSHI_MEMORY_FILE` | `<root>/.koshi/memory.json` | Path to a JSON file used to persist memories across server restarts. Atomic writes, schema-versioned. **Ignored when `KOSHI_MEMORY_VAULT` is also set** (a one-line stderr warning is emitted when *both* are explicitly set). |
+| `KOSHI_MEMORY_VAULT` | _(unset — vault stays opt-in)_ | Path to a directory used to persist memories as **one Markdown file per memory** under `<vault>/koshi/<type>/`. Git-friendly, Obsidian-compatible. External edits/deletes are picked up on the next tool call without a restart. Relative paths resolve against `KOSHI_PROJECT_ROOT`. See [docs/vault-mode.md](../../docs/vault-mode.md) for the full format spec and migration guide. |
+
+Absolute env values are used as-is; relative env values resolve against `KOSHI_PROJECT_ROOT`; empty/whitespace values are treated as unset. Run `koshi_health` to see exactly which value is in effect for each path and whether it came from `[env]` or `[default]`.
 
 **Default safety limits** (hardcoded; tweakable per-call where applicable):
 

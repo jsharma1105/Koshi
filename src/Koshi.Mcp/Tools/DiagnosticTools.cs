@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Reflection;
+using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
 
 namespace Koshi.Mcp.Tools;
@@ -60,11 +61,14 @@ public sealed class DiagnosticTools
         }
         sb.AppendLine();
 
-        sb.AppendLine("  Configuration (env vars):");
-        sb.AppendLine($"    KOSHI_INDEX_PATH:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH") ?? "(unset)"}");
-        sb.AppendLine($"    KOSHI_INDEX_FILE:   {Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE") ?? "(unset)"}");
-        sb.AppendLine($"    KOSHI_MEMORY_FILE:  {Environment.GetEnvironmentVariable("KOSHI_MEMORY_FILE") ?? "(unset)"}");
-        sb.AppendLine($"    KOSHI_MEMORY_VAULT: {Environment.GetEnvironmentVariable("KOSHI_MEMORY_VAULT") ?? "(unset)"}");
+        sb.AppendLine("  Configuration (resolved paths):");
+        var paths = PathConfig.Default;
+        sb.AppendLine($"    Project root:       {paths.ProjectRoot}  [{PathConfig.SourceLabel(paths.ProjectRootFromEnv)}]");
+        sb.AppendLine($"    KOSHI_INDEX_PATH:   {paths.IndexPath}  [{PathConfig.SourceLabel(paths.IndexPathFromEnv)}]");
+        sb.AppendLine($"      auto-index:       {(paths.IndexPathFromEnv ? "enabled (env)" : "disabled (set KOSHI_INDEX_PATH to enable)")}");
+        sb.AppendLine($"    KOSHI_INDEX_FILE:   {paths.IndexFile}  [{PathConfig.SourceLabel(paths.IndexFileFromEnv)}]");
+        sb.AppendLine($"    KOSHI_MEMORY_FILE:  {paths.MemoryFile}  [{PathConfig.SourceLabel(paths.MemoryFileFromEnv)}]");
+        sb.AppendLine($"    KOSHI_MEMORY_VAULT: {paths.MemoryVault ?? "(unset)"}  [{(paths.MemoryVaultFromEnv ? "env" : "default")}]");
         sb.AppendLine();
 
         var uptime = DateTimeOffset.UtcNow - _startedAt;

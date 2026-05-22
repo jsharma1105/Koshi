@@ -31,6 +31,14 @@ That's it. Every `koshi_remember` from now on writes one Markdown file to
 teammate who clones the repo and sets `KOSHI_MEMORY_VAULT` to their local
 checkout sees the same memories.
 
+> **Tip — relative vault paths.** Since v0.6.0, `KOSHI_MEMORY_VAULT` accepts
+> a relative path; it's resolved against `KOSHI_PROJECT_ROOT` (which itself
+> defaults to the cwd Koshi was launched from). So
+> `KOSHI_MEMORY_VAULT=team-vault` lands the vault next to your code at
+> `<project>/team-vault/koshi/...`, which is handy when you want the vault
+> to live inside the project repo. Absolute paths still work exactly as
+> before.
+
 ---
 
 ## Why a vault?

@@ -47,7 +47,7 @@ public sealed class RetrievalTools
 
     static RetrievalTools()
     {
-        _persistence = new IndexPersistence(Environment.GetEnvironmentVariable("KOSHI_INDEX_FILE"));
+        _persistence = new IndexPersistence(PathConfig.Default.IndexFile);
     }
 
     [McpServerTool(Name = "koshi_index"), Description(
@@ -196,12 +196,19 @@ public sealed class RetrievalTools
 
         if (!_isIndexed)
         {
-            var envPath = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
-            if (string.IsNullOrEmpty(envPath))
+            // Auto-index from KOSHI_INDEX_PATH remains opt-in even after the
+            // v0.6.0 project-root defaults: a user-supplied env var (or
+            // explicit koshi_index_directory call) is the only signal that
+            // says "yes, please scan files automatically". Defaulting the
+            // PATH to the project root would otherwise risk a costly
+            // surprise scan on the first search call.
+            if (!PathConfig.Default.IndexPathFromEnv)
             {
                 return "❌ No documents indexed. Call koshi_index_directory(path) first, " +
                        "or set the KOSHI_INDEX_PATH / KOSHI_INDEX_FILE environment variable in your MCP client config.";
             }
+
+            var envPath = PathConfig.Default.IndexPath;
 
             // Throttle: if the most recent attempt failed and the retry window
             // hasn't elapsed, surface the cached failure WITHOUT re-running
@@ -364,18 +371,37 @@ public sealed class RetrievalTools
             && envelope.SourcePath != ContentFingerprint.InMemorySource
             && envelope.ContentFingerprint is not null)
         {
-            // Cross-check against KOSHI_INDEX_PATH when set — if the user
-            // pointed the server at a different directory than the snapshot
-            // came from, we must not silently serve stale results.
-            var envPath = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
-            if (!string.IsNullOrEmpty(envPath))
+            // Cross-check against KOSHI_INDEX_PATH when explicitly set — if the
+            // user pointed the server at a different directory than the
+            // snapshot came from, we must not silently serve stale results.
+            // We only check when the env var was explicitly set, to avoid
+            // false positives from the v0.6.0 project-root default.
+            if (PathConfig.Default.IndexPathFromEnv)
             {
-                var resolved = Path.GetFullPath(envPath);
+                var resolved = PathConfig.Default.IndexPath;
                 if (!string.Equals(resolved, envelope.SourcePath, StringComparison.OrdinalIgnoreCase))
                 {
                     Console.Error.WriteLine(
                         $"[koshi] Discarding index snapshot: source path '{envelope.SourcePath}' " +
                         $"differs from KOSHI_INDEX_PATH '{resolved}'.");
+                    return;
+                }
+            }
+            else
+            {
+                // Containment safety: when KOSHI_INDEX_PATH is unset (using
+                // the v0.6.0 defaults), we only accept snapshots whose source
+                // is under the project root. Prevents a stray .koshi/
+                // copied between projects from silently serving results
+                // sourced from a totally different directory.
+                var root = PathConfig.Default.ProjectRoot;
+                var srcFull = Path.GetFullPath(envelope.SourcePath);
+                if (!srcFull.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(srcFull, root, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine(
+                        $"[koshi] Discarding index snapshot: source path '{srcFull}' " +
+                        $"is outside project root '{root}'. Set KOSHI_INDEX_PATH explicitly to override.");
                     return;
                 }
             }
@@ -439,11 +465,18 @@ public sealed class RetrievalTools
 
     private static string? ResolveIndexPath(string? explicitPath)
     {
+        // Explicit caller-supplied path wins. Relative paths resolve against
+        // the project root so callers can say
+        // koshi_index_directory("src") and have it Just Work in a multi-
+        // workspace setup.
         if (!string.IsNullOrWhiteSpace(explicitPath))
-            return Path.GetFullPath(explicitPath);
+            return PathConfig.Default.ResolveUserPath(explicitPath);
 
-        var env = Environment.GetEnvironmentVariable("KOSHI_INDEX_PATH");
-        return string.IsNullOrWhiteSpace(env) ? null : Path.GetFullPath(env);
+        // No explicit path: fall back to PathConfig.IndexPath. When
+        // KOSHI_INDEX_PATH is set it wins; otherwise the v0.6.0 default
+        // (the project root) is used. Returning null is impossible here —
+        // the resolver guarantees a non-null absolute IndexPath.
+        return PathConfig.Default.IndexPath;
     }
 
 }

@@ -977,6 +977,147 @@ finally
     }
 }
 
+// ─── Phase 7: Project-root defaults (no path env vars set) ──────────────
+// Validates the v0.6.0 amendment: when a third MCP process is launched with
+// cwd=<tmp> and NO KOSHI_* path env vars, memory + index land under
+// <tmp>/.koshi/ automatically. This is the "open Copilot in C:\OPP, run
+// Koshi, get C:\OPP\.koshi\memory.json" guarantee.
+string? defCwd = null;
+try
+{
+    defCwd = Path.Combine(Path.GetTempPath(), $"koshi-smoke-defaults-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(defCwd);
+    Console.Error.WriteLine($"[setup] defaults cwd: {defCwd}");
+
+    var dpsi = exePath is not null
+        ? new ProcessStartInfo(exePath)
+        : new ProcessStartInfo("dotnet", $"\"{dllPath}\"");
+    dpsi.RedirectStandardInput = true;
+    dpsi.RedirectStandardOutput = true;
+    dpsi.RedirectStandardError = true;
+    dpsi.UseShellExecute = false;
+    dpsi.StandardInputEncoding = Encoding.UTF8;
+    dpsi.StandardOutputEncoding = Encoding.UTF8;
+    dpsi.WorkingDirectory = defCwd;
+    // Strip every Koshi path env var so the process starts in "fresh install"
+    // mode and must rely on cwd-derived defaults.
+    dpsi.Environment.Remove("KOSHI_PROJECT_ROOT");
+    dpsi.Environment.Remove("KOSHI_MEMORY_FILE");
+    dpsi.Environment.Remove("KOSHI_MEMORY_VAULT");
+    dpsi.Environment.Remove("KOSHI_INDEX_FILE");
+    dpsi.Environment.Remove("KOSHI_INDEX_PATH");
+
+    var dproc = Process.Start(dpsi)!;
+    var dresponses = new Dictionary<int, JsonElement>();
+    int dnextId = 1;
+
+    _ = Task.Run(async () =>
+    {
+        string? line;
+        while ((line = await dproc.StandardError.ReadLineAsync()) is not null)
+            Console.Error.WriteLine($"[defaults-stderr] {line}");
+    });
+    _ = Task.Run(async () =>
+    {
+        string? line;
+        while ((line = await dproc.StandardOutput.ReadLineAsync()) is not null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement.Clone();
+                if (root.TryGetProperty("id", out var idElem) && idElem.ValueKind == JsonValueKind.Number)
+                    dresponses[idElem.GetInt32()] = root;
+            }
+            catch (JsonException) { Console.Error.WriteLine($"[defaults non-json] {line}"); }
+        }
+    });
+
+    async Task<JsonElement?> DRpcAsync(string method, object? @params = null, int timeoutMs = 8000)
+    {
+        int id = dnextId++;
+        var payload = @params is null
+            ? $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}"}"""
+            : $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}","params":{{JsonSerializer.Serialize(@params)}}}""";
+        await dproc.StandardInput.WriteLineAsync(payload);
+        await dproc.StandardInput.FlushAsync();
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (dresponses.TryGetValue(id, out var r)) return r;
+            await Task.Delay(50);
+        }
+        return null;
+    }
+
+    async Task<string?> DToolAsync(string tool, object args)
+    {
+        var resp = await DRpcAsync("tools/call", new { name = tool, arguments = args });
+        return resp is null ? null : ExtractFirstText(resp.Value);
+    }
+
+    // Handshake.
+    var dinitResp = await DRpcAsync("initialize", new
+    {
+        protocolVersion = "2024-11-05",
+        capabilities = new { },
+        clientInfo = new { name = "smoke-defaults", version = "0.1" }
+    });
+    if (dinitResp is null) failures.Add("defaults: initialize TIMEOUT");
+    await dproc.StandardInput.WriteLineAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
+    await dproc.StandardInput.FlushAsync();
+
+    // Remember one memory — should land at <defCwd>/.koshi/memory.json
+    // (JSON backend; vault stays opt-in even when defaults are active).
+    var remember = await DToolAsync("koshi_remember", new
+    {
+        content = "Defaults smoke marker zetapaxquark42.",
+        subject = "defaults smoke",
+        type = "Fact"
+    });
+    if (remember is null) failures.Add("defaults: koshi_remember TIMEOUT");
+
+    var expectedMemFile = Path.Combine(defCwd, ".koshi", "memory.json");
+    if (!File.Exists(expectedMemFile))
+        failures.Add($"defaults: expected memory file at {expectedMemFile} (was the cwd-derived default applied?)");
+    else if (new FileInfo(expectedMemFile).Length == 0)
+        failures.Add($"defaults: memory file at {expectedMemFile} is empty after koshi_remember");
+
+    // Diagnostics should surface the resolved paths + the "default" source.
+    var health = await DToolAsync("koshi_health", new { });
+    if (health is null)
+    {
+        failures.Add("defaults: koshi_health TIMEOUT");
+    }
+    else
+    {
+        if (!health.Contains(defCwd, StringComparison.OrdinalIgnoreCase))
+            failures.Add($"defaults: koshi_health did not surface tmp cwd '{defCwd}'. Got: {health[..Math.Min(400, health.Length)]}");
+        if (!health.Contains("[default]", StringComparison.Ordinal))
+            failures.Add($"defaults: koshi_health did not show '[default]' source label. Got: {health[..Math.Min(400, health.Length)]}");
+    }
+
+    dproc.StandardInput.Close();
+    dproc.WaitForExit(5000);
+    if (!dproc.HasExited) dproc.Kill();
+    Console.Error.WriteLine("[ok] defaults smoke phase complete");
+}
+catch (Exception ex)
+{
+    failures.Add($"defaults smoke: unexpected exception: {ex.GetType().Name}: {ex.Message}");
+}
+finally
+{
+    if (defCwd is not null)
+    {
+        try { Directory.Delete(defCwd, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Console.Error.WriteLine($"[cleanup] WARN: could not remove defaults cwd {defCwd}: {ex.Message}");
+        }
+    }
+}
+
 // ─── Shutdown ───────────────────────────────────────────────────────────
 proc.StandardInput.Close();
 proc.WaitForExit(5000);
