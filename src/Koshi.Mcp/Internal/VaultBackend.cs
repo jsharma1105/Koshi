@@ -1,3 +1,4 @@
+using System.Security;
 using System.Threading;
 using Koshi.Core.Memory;
 
@@ -67,7 +68,7 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
 
         // Legacy: KoshiDir is the watch root for diagnostic purposes.
         var watchSpec = Layout.WatcherSpec(Root);
-        KoshiDir = watchSpec?.watchDir ?? Path.Combine(Root, "koshi");
+        KoshiDir = watchSpec?.watchDir ?? Path.Join(Root, "koshi");
 
         _watchRequested = watch && WatcherEnvAllows();
         if (_watchRequested && watchSpec is { } spec)
@@ -90,7 +91,11 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
                 _watcher.EnableRaisingEvents = true;
                 _watcherAttached = true;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (
+                ex is ArgumentException or IOException or PathTooLongException
+                    or FileNotFoundException or DirectoryNotFoundException
+                    or UnauthorizedAccessException or SecurityException
+                    or PlatformNotSupportedException)
             {
                 Console.Error.WriteLine(
                     $"[koshi] Vault watcher could not attach to '{spec.watchDir}' " +
@@ -146,7 +151,13 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             _watcher.Error -= OnWatcherError;
             _watcher.Dispose();
         }
-        catch { /* best effort on shutdown */ }
+        catch (Exception ex) when (
+            ex is ObjectDisposedException or IOException or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            // Best-effort on shutdown — log nothing (Dispose path).
+            _ = ex;
+        }
     }
 
     public List<MemoryRecord> LoadAll()
@@ -157,11 +168,10 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         var idToMtime = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         var idToRecord = new Dictionary<string, MemoryRecord>(StringComparer.Ordinal);
 
-        foreach (var path in Layout.EnumerateOwnedFiles(Root))
+        foreach (var path in Layout.EnumerateOwnedFiles(Root)
+            .Where(p => Path.GetExtension(p) is ".md"
+                && !p.EndsWith(".tmp", StringComparison.Ordinal)))
         {
-            if (Path.GetExtension(path) is not ".md") continue;
-            if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
-
             var parsed = VaultDocument.Read(path);
             if (parsed is null)
             {
@@ -220,7 +230,9 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             VaultDocument.Write(targetPath, record, otherFrontmatter);
             _idToPath[record.Id] = targetPath;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or PathTooLongException or DirectoryNotFoundException)
         {
             Console.Error.WriteLine($"[koshi] Failed to write '{targetPath}': {ex.Message}");
             return;
@@ -230,7 +242,8 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             && !PathsEqual(existingPath, targetPath))
         {
             try { File.Delete(existingPath); }
-            catch (Exception ex)
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException or SecurityException)
             {
                 Console.Error.WriteLine($"[koshi] Could not delete old memory file '{existingPath}': {ex.Message}");
             }
@@ -246,7 +259,8 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             File.Delete(path);
             _idToPath.Remove(id);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException)
         {
             Console.Error.WriteLine($"[koshi] Could not delete memory file '{path}': {ex.Message}");
         }
@@ -256,14 +270,16 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
     {
         Layout.EnsureDirs(Root);
         // Delete only koshi-id-tagged files; leave unmanaged user notes alone.
-        foreach (var path in Layout.EnumerateOwnedFiles(Root).ToList())
+        foreach (var path in Layout.EnumerateOwnedFiles(Root)
+            .Where(p => !p.EndsWith(".tmp", StringComparison.Ordinal))
+            .ToList())
         {
-            if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
             var parsed = VaultDocument.Read(path);
             if (parsed is not null)
             {
                 try { File.Delete(path); }
-                catch (Exception ex)
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException or SecurityException)
                 {
                     Console.Error.WriteLine($"[koshi] Could not delete '{path}' during ReplaceAll: {ex.Message}");
                 }

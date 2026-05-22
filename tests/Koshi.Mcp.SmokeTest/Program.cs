@@ -779,7 +779,11 @@ await ExpectSuccessAsync("koshi_memory_sync_vault", "koshi_memory_sync_vault", n
     }
     finally
     {
-        try { if (Directory.Exists(vaultProbeDir)) Directory.Delete(vaultProbeDir, recursive: true); } catch { }
+        try { if (Directory.Exists(vaultProbeDir)) Directory.Delete(vaultProbeDir, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Console.Error.WriteLine($"[cleanup] vault probe dir leftover: {ex.Message}");
+        }
     }
 }
 
@@ -916,14 +920,13 @@ try
     await VToolAsync("koshi_remember", new { content = "Pattern body gamma-token-VLT.", subject = "vault pattern one", type = "Pattern" });
 
     // Assert file layout.
-    var koshiRoot = Path.Combine(vaultDir, "koshi");
-    foreach (var sub in new[] { "facts", "decisions", "patterns" })
+    var koshiRoot = Path.Join(vaultDir, "koshi");
+    var missingDirs = new[] { "facts", "decisions", "patterns" }
+        .Select(sub => Path.Join(koshiRoot, sub))
+        .Where(dir => !Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*.md").Any());
+    foreach (var dir in missingDirs)
     {
-        var dir = Path.Combine(koshiRoot, sub);
-        if (!Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*.md").Any())
-        {
-            failures.Add($"vault: expected at least one .md under {dir}");
-        }
+        failures.Add($"vault: expected at least one .md under {dir}");
     }
 
     // Stats should report backend == vault.
@@ -935,7 +938,7 @@ try
     // The body marker (phantomzqx99201) is a single-token, non-hyphenated string that does NOT
     // appear in the query — so we can detect actual body presence vs. recall's query-echo
     // response ("No memories found matching '<query>'.").
-    var externalMemPath = Path.Combine(koshiRoot, "facts", "external-fact--mem-999001.md");
+    var externalMemPath = Path.Join(koshiRoot, "facts", "external-fact--mem-999001.md");
     File.WriteAllText(externalMemPath, """
 ---
 koshi:
@@ -956,7 +959,7 @@ koshi:
 
 External vault assertion body. Marker phantomzqx99201 for vault smoke test.
 """);
-    var unmanagedPath = Path.Combine(koshiRoot, "facts", "my-personal-note.md");
+    var unmanagedPath = Path.Join(koshiRoot, "facts", "my-personal-note.md");
     File.WriteAllText(unmanagedPath, "# A personal note\n\nNot managed by Koshi.\n");
 
     // Recall should now see the external file (vault reloads per call).
@@ -978,7 +981,7 @@ External vault assertion body. Marker phantomzqx99201 for vault smoke test.
         failures.Add("vault: cache-divergence regression — deleted external file still returned by recall");
 
     // Subject rename via Remember reusing the same subject keyword — exactly one file should exist per type.
-    var factDir = Path.Combine(koshiRoot, "facts");
+    var factDir = Path.Join(koshiRoot, "facts");
     var factCountBefore = Directory.EnumerateFiles(factDir, "*.md").Count();
     if (factCountBefore == 0)
         failures.Add("vault: no fact files found after Phase 6 mutations");
@@ -989,7 +992,9 @@ External vault assertion body. Marker phantomzqx99201 for vault smoke test.
     if (!vproc.HasExited) vproc.Kill();
     Console.Error.WriteLine("[ok] vault smoke phase complete");
 }
-catch (Exception ex)
+catch (Exception ex) when (
+    ex is not OutOfMemoryException and not StackOverflowException
+       and not ThreadAbortException)
 {
     failures.Add($"vault smoke: unexpected exception: {ex.GetType().Name}: {ex.Message}");
 }
@@ -1013,7 +1018,7 @@ finally
 string? defCwd = null;
 try
 {
-    defCwd = Path.Combine(Path.GetTempPath(), $"koshi-smoke-defaults-{Guid.NewGuid():N}");
+    defCwd = Path.Join(Path.GetTempPath(), $"koshi-smoke-defaults-{Guid.NewGuid():N}");
     Directory.CreateDirectory(defCwd);
     Console.Error.WriteLine($"[setup] defaults cwd: {defCwd}");
 
@@ -1105,7 +1110,7 @@ try
     });
     if (remember is null) failures.Add("defaults: koshi_remember TIMEOUT");
 
-    var expectedMemFile = Path.Combine(defCwd, ".koshi", "memory.json");
+    var expectedMemFile = Path.Join(defCwd, ".koshi", "memory.json");
     if (!File.Exists(expectedMemFile))
         failures.Add($"defaults: expected memory file at {expectedMemFile} (was the cwd-derived default applied?)");
     else if (new FileInfo(expectedMemFile).Length == 0)
@@ -1130,7 +1135,9 @@ try
     if (!dproc.HasExited) dproc.Kill();
     Console.Error.WriteLine("[ok] defaults smoke phase complete");
 }
-catch (Exception ex)
+catch (Exception ex) when (
+    ex is not OutOfMemoryException and not StackOverflowException
+       and not ThreadAbortException)
 {
     failures.Add($"defaults smoke: unexpected exception: {ex.GetType().Name}: {ex.Message}");
 }

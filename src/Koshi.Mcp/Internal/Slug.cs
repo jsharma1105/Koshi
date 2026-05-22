@@ -25,10 +25,8 @@ internal static class Slug
         if (string.IsNullOrWhiteSpace(subject)) return Fallback;
 
         var sb = new StringBuilder(subject.Length);
-        foreach (var c in subject)
+        foreach (var ch in subject.Select(c => (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c))
         {
-            char ch = c;
-            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32);
             if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))
                 sb.Append(ch);
             else

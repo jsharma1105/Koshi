@@ -10,14 +10,15 @@ public class JsonFileBackendTests : IDisposable
 
     public JsonFileBackendTests()
     {
-        _tmpDir = Path.Combine(Path.GetTempPath(), "koshi-jsonbe-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        _tmpDir = Path.Join(Path.GetTempPath(), "koshi-jsonbe-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tmpDir);
-        _file = Path.Combine(_tmpDir, "memory.json");
+        _file = Path.Join(_tmpDir, "memory.json");
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tmpDir, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_tmpDir, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
     private static MemoryRecord Make(string id, string subject) => new()
@@ -124,7 +125,7 @@ public class JsonFileBackendTests : IDisposable
     [Fact]
     public void Atomic_write_creates_parent_directory()
     {
-        var nested = Path.Combine(_tmpDir, "a", "b", "c", "memory.json");
+        var nested = Path.Join(_tmpDir, "a", "b", "c", "memory.json");
         var be = new JsonFileBackend(nested);
         be.Upsert(Make("mem-000001", "x"), [Make("mem-000001", "x")]);
         Assert.True(File.Exists(nested));

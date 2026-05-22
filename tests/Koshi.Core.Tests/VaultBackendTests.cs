@@ -16,7 +16,7 @@ public class VaultBackendTests : IDisposable
 
     public VaultBackendTests()
     {
-        _vault = Path.Combine(Path.GetTempPath(), "koshi-vaultbe-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        _vault = Path.Join(Path.GetTempPath(), "koshi-vaultbe-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_vault);
         // The 2-arg VaultBackend ctor resolves layout from this env var
         // (since PR #41). Null it out so these tests deterministically
@@ -29,7 +29,8 @@ public class VaultBackendTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(VaultLayout.EnvVar, _origFlavorEnv);
-        try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_vault, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
     private static MemoryRecord Make(string id, MemoryType type, string subject, string? content = null) => new()
@@ -55,7 +56,7 @@ public class VaultBackendTests : IDisposable
 
         be.Upsert(rec, [rec]);
 
-        var expected = Path.Combine(_vault, "koshi", "decisions", "chose-dapper--mem-000001.md");
+        var expected = Path.Join(_vault, "koshi", "decisions", "chose-dapper--mem-000001.md");
         Assert.True(File.Exists(expected), $"Expected file at: {expected}");
     }
 
@@ -64,10 +65,10 @@ public class VaultBackendTests : IDisposable
     {
         _ = new VaultBackend(_vault, watch: false);
 
-        Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "facts")));
-        Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "decisions")));
-        Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "patterns")));
-        Assert.True(Directory.Exists(Path.Combine(_vault, "koshi", "preferences")));
+        Assert.True(Directory.Exists(Path.Join(_vault, "koshi", "facts")));
+        Assert.True(Directory.Exists(Path.Join(_vault, "koshi", "decisions")));
+        Assert.True(Directory.Exists(Path.Join(_vault, "koshi", "patterns")));
+        Assert.True(Directory.Exists(Path.Join(_vault, "koshi", "preferences")));
     }
 
     [Fact]
@@ -80,7 +81,7 @@ public class VaultBackendTests : IDisposable
         var v2 = v1 with { Content = "updated content" };
         be.Upsert(v2, [v2]);
 
-        var files = Directory.GetFiles(Path.Combine(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
+        var files = Directory.GetFiles(Path.Join(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
         Assert.Single(files);
         Assert.Contains("updated content", File.ReadAllText(files[0]));
     }
@@ -91,17 +92,17 @@ public class VaultBackendTests : IDisposable
         var be = new VaultBackend(_vault, watch: false);
         var v1 = Make("mem-000001", MemoryType.Pattern, "Old Subject");
         be.Upsert(v1, [v1]);
-        var oldPath = Path.Combine(_vault, "koshi", "patterns", "old-subject--mem-000001.md");
+        var oldPath = Path.Join(_vault, "koshi", "patterns", "old-subject--mem-000001.md");
         Assert.True(File.Exists(oldPath));
 
         var v2 = v1 with { Subject = "New Subject" };
         be.Upsert(v2, [v2]);
 
-        var newPath = Path.Combine(_vault, "koshi", "patterns", "new-subject--mem-000001.md");
+        var newPath = Path.Join(_vault, "koshi", "patterns", "new-subject--mem-000001.md");
         Assert.True(File.Exists(newPath), "new path must exist");
         Assert.False(File.Exists(oldPath), "old path must be deleted");
 
-        var files = Directory.GetFiles(Path.Combine(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
+        var files = Directory.GetFiles(Path.Join(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
         Assert.Single(files);
     }
 
@@ -115,7 +116,7 @@ public class VaultBackendTests : IDisposable
 
         be.Delete("mem-000001", []);
 
-        var files = Directory.GetFiles(Path.Combine(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
+        var files = Directory.GetFiles(Path.Join(_vault, "koshi"), "*.md", SearchOption.AllDirectories);
         Assert.Empty(files);
     }
 
@@ -126,7 +127,7 @@ public class VaultBackendTests : IDisposable
         Assert.Empty(be.LoadAll());
 
         // External agent (e.g., git pull) drops a properly-formatted .md file.
-        var ext = Path.Combine(_vault, "koshi", "facts", "external--mem-000077.md");
+        var ext = Path.Join(_vault, "koshi", "facts", "external--mem-000077.md");
         File.WriteAllText(ext,
             "---\n" +
             "koshi:\n" +
@@ -157,7 +158,7 @@ public class VaultBackendTests : IDisposable
     public void LoadAll_reports_files_without_koshi_id_as_unmanaged()
     {
         var be = new VaultBackend(_vault, watch: false);
-        var plain = Path.Combine(_vault, "koshi", "my-personal-note.md");
+        var plain = Path.Join(_vault, "koshi", "my-personal-note.md");
         File.WriteAllText(plain, "# Just my note\n\nNo frontmatter here.\n");
 
         var all = be.LoadAll();
@@ -176,7 +177,7 @@ public class VaultBackendTests : IDisposable
         be.LoadAll();
 
         // User edits the file in Obsidian and adds tags.
-        var path = Path.Combine(_vault, "koshi", "facts", "tagged-fact--mem-000010.md");
+        var path = Path.Join(_vault, "koshi", "facts", "tagged-fact--mem-000010.md");
         var orig = File.ReadAllText(path);
         var fmEnd = orig.IndexOf("\n---\n", StringComparison.Ordinal);
         Assert.True(fmEnd > 0);
@@ -200,14 +201,14 @@ public class VaultBackendTests : IDisposable
         var rec = Make("mem-000001", MemoryType.Fact, "Will be replaced");
         be.Upsert(rec, [rec]);
 
-        var unmanaged = Path.Combine(_vault, "koshi", "my-readme.md");
+        var unmanaged = Path.Join(_vault, "koshi", "my-readme.md");
         File.WriteAllText(unmanaged, "# User README\n");
 
         var newRec = Make("mem-000099", MemoryType.Decision, "Brand new");
         be.ReplaceAll([newRec]);
 
         Assert.True(File.Exists(unmanaged), "unmanaged file must be preserved");
-        var managed = Directory.EnumerateFiles(Path.Combine(_vault, "koshi"), "*.md", SearchOption.AllDirectories)
+        var managed = Directory.EnumerateFiles(Path.Join(_vault, "koshi"), "*.md", SearchOption.AllDirectories)
             .Where(p => p != unmanaged)
             .ToList();
         Assert.Single(managed);
@@ -220,8 +221,8 @@ public class VaultBackendTests : IDisposable
         var be = new VaultBackend(_vault, watch: false);
 
         // Same id in two different paths (e.g., post-merge artifact).
-        var earlier = Path.Combine(_vault, "koshi", "facts", "earlier--mem-000005.md");
-        var later = Path.Combine(_vault, "koshi", "facts", "later--mem-000005.md");
+        var earlier = Path.Join(_vault, "koshi", "facts", "earlier--mem-000005.md");
+        var later = Path.Join(_vault, "koshi", "facts", "later--mem-000005.md");
         var frontmatter =
             "---\n" +
             "koshi:\n" +
@@ -260,7 +261,7 @@ public class VaultBackendTests : IDisposable
         be.Upsert(a, [a, b]);
         be.Upsert(b, [a, b]);
 
-        var aPath = Path.Combine(_vault, "koshi", "facts", "will-be-deleted--mem-000001.md");
+        var aPath = Path.Join(_vault, "koshi", "facts", "will-be-deleted--mem-000001.md");
         Assert.True(File.Exists(aPath));
 
         // Teammate deletes the file (or it gets removed by a git pull).
@@ -279,7 +280,7 @@ public class VaultBackendTests : IDisposable
         be.Upsert(rec, [rec]);
 
         // Simulate a crashed half-written file from a previous Upsert.
-        var stuckTmp = Path.Combine(_vault, "koshi", "facts", "stuck--mem-000002.md.tmp");
+        var stuckTmp = Path.Join(_vault, "koshi", "facts", "stuck--mem-000002.md.tmp");
         File.WriteAllText(stuckTmp, "junk");
 
         var all = be.LoadAll();

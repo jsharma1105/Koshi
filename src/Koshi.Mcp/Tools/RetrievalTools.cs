@@ -217,8 +217,11 @@ public sealed class RetrievalTools
                 if (allChunks.Count > MaxChunks)
                     return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Use a pattern filter to reduce scope.";
             }
-            catch
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+                    or NotSupportedException or PathTooLongException)
             {
+                _ = ex;
                 skipped++;
             }
         }
