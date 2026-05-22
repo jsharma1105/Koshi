@@ -47,6 +47,13 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    File:        {indexStatus.persistencePath ?? "(in-memory only)"}");
         if (indexStatus.loadedFromSnapshot)
             sb.AppendLine($"    Loaded:      from snapshot");
+        var namedCorpora = RetrievalTools.GetNamedCorporaStatus();
+        if (namedCorpora.Count > 0)
+        {
+            sb.AppendLine($"    Named corpora: {namedCorpora.Count}");
+            foreach (var nc in namedCorpora)
+                sb.AppendLine($"      • {nc.name}: {nc.chunks} chunks from {nc.sources} sources ({nc.path ?? "in-memory"})");
+        }
         sb.AppendLine();
 
         sb.AppendLine("  Memory:");

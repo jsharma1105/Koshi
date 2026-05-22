@@ -205,6 +205,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MemoryRecord.Embedding` field when a provider is configured (no-op
   otherwise, with a one-line note in the response). `koshi_health`
   reports the configured provider's model + dimensions.
+- **Multi-corpus retrieval (#23).** `koshi_index`, `koshi_index_directory`,
+  `koshi_search`, `koshi_list_indexed`, and `koshi_clear_index` now
+  accept an optional `corpus` parameter. The `default` corpus retains
+  the v0.6.0 single-corpus semantics (snapshot persistence,
+  auto-index, etc.); named corpora are in-memory only and live
+  side-by-side, letting agents query multiple repos without
+  thrashing snapshots. `koshi_clear_index(corpus="*")` clears every
+  corpus; `koshi_list_indexed(corpus=null)` lists all corpora;
+  `koshi_health` reports per-named-corpus stats.
 - **Stale CodeQL alerts cleared.** The 20 `useless-cast-to-self` alerts
   in generated `System.Text.Json.SourceGeneration` files were filed
   before `.github/codeql/codeql-config.yml` added `paths-ignore` for
