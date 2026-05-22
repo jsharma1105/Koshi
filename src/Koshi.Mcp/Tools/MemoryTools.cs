@@ -514,6 +514,151 @@ public sealed class MemoryTools
         return $"✅ Reloaded vault. {count} memories now in cache.";
     }
 
+    [McpServerTool(Name = "koshi_capture_turn"), Description(
+        "Capture decisions made in the current conversation turn into memory. " +
+        "Pass a 1-3 paragraph summary of the turn and any linked PR/commits. " +
+        "The server applies lightweight pattern heuristics (no LLM) to extract " +
+        "decision-shape sentences and persists each as a Decision memory with " +
+        "provenance. Set auto_promote=false to preview candidates without saving. " +
+        "Recommended: call this once at the end of every meaningful turn — see " +
+        "docs/copilot-instructions-snippet.md for a snippet you can paste into " +
+        "your repo's .github/copilot-instructions.md so the agent calls it reliably.")]
+    public static string CaptureTurn(
+        [Description("Plain-text summary of the turn (1-3 paragraphs). Decision-shape sentences will be extracted.")]
+        string turn_summary,
+        [Description("Optional linked PR number (e.g., 1234) to record as provenance.")]
+        int linked_pr = 0,
+        [Description("Optional comma-separated linked commit SHAs/refs to record as provenance.")]
+        string? linked_commits = null,
+        [Description("If true (default), persist extracted decisions immediately. If false, return candidates without saving.")]
+        bool auto_promote = true,
+        [Description("Maximum candidates to extract (default 5).")]
+        int max_candidates = 5,
+        [Description("Confidence floor for accepting candidates (0-1, default 0.5).")]
+        float min_confidence = 0.5f,
+        [Description("Optional user identifier. Empty or '*' means globally visible.")]
+        string? userId = null,
+        [Description("Optional workspace identifier. Defaults to 'default'.")]
+        string? workspaceId = null,
+        [Description("Optional thread identifier for conversation-scoped memories.")]
+        string? threadId = null)
+    {
+        if (string.IsNullOrWhiteSpace(turn_summary))
+            return "❌ turn_summary must not be empty.";
+
+        min_confidence = Math.Clamp(min_confidence, 0f, 1f);
+        max_candidates = Math.Clamp(max_candidates, 1, 20);
+
+        var allCandidates = DecisionExtractor.Extract(turn_summary, max_candidates);
+        var candidates = allCandidates.Where(c => c.Confidence >= min_confidence).ToList();
+
+        if (candidates.Count == 0)
+        {
+            return "ℹ No decision-shape sentences detected in the turn summary " +
+                   $"(extractor found {allCandidates.Count} weak match(es), all below confidence floor {min_confidence:F2}). " +
+                   "Either no decisions were made, or rephrase explicitly — e.g., " +
+                   "\"Decision: ...\", \"We chose X over Y because Z\", \"Fixed by ...\".";
+        }
+
+        var scope = new MemoryScope(
+            UserId: string.IsNullOrWhiteSpace(userId) ? "*" : userId.Trim(),
+            WorkspaceId: string.IsNullOrWhiteSpace(workspaceId) ? "default" : workspaceId.Trim(),
+            ThreadId: string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim());
+
+        var provenance = BuildProvenance(linked_pr, linked_commits);
+
+        if (!auto_promote)
+        {
+            var preview = new System.Text.StringBuilder();
+            preview.AppendLine($"📋 {candidates.Count} candidate decision(s) extracted (auto_promote=false, none saved):\n");
+            int i = 1;
+            foreach (var cand in candidates)
+            {
+                preview.AppendLine($"  [{i++}] (conf {cand.Confidence:F2}, {cand.MatchedPattern})");
+                preview.AppendLine($"      Subject: {cand.Subject}");
+                preview.AppendLine($"      Body:    {Truncate(cand.Body, 160)}");
+                preview.AppendLine();
+            }
+            preview.AppendLine("To persist these, re-call with auto_promote=true (default) or call koshi_remember manually.");
+            return preview.ToString();
+        }
+
+        return _store.WithFreshState(memories =>
+        {
+            var saved = new List<(string Id, string Subject)>();
+            var skipped = new List<(string Subject, string Reason)>();
+
+            foreach (var cand in candidates)
+            {
+                if (memories.Count >= MaxMemories)
+                {
+                    skipped.Add((cand.Subject, "memory limit reached"));
+                    break;
+                }
+
+                var dupe = memories.FirstOrDefault(m =>
+                    m.Type == MemoryType.Decision &&
+                    string.Equals(m.Subject, cand.Subject, StringComparison.OrdinalIgnoreCase) &&
+                    m.Scope.WorkspaceId == scope.WorkspaceId);
+                if (dupe is not null)
+                {
+                    skipped.Add((cand.Subject, $"duplicate of {dupe.Id}"));
+                    continue;
+                }
+
+                var body = provenance is null
+                    ? cand.Body
+                    : $"{cand.Body}\n\n---\n{provenance}";
+
+                var record = new MemoryRecord
+                {
+                    Id = _store.AllocateId(),
+                    Type = MemoryType.Decision,
+                    Content = body,
+                    Subject = cand.Subject,
+                    Scope = scope,
+                    Source = "koshi_capture_turn",
+                    Confidence = cand.Confidence,
+                };
+
+                memories.Add(record);
+                _store.Upsert(record);
+                saved.Add((record.Id, cand.Subject));
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"✅ Captured {saved.Count} decision(s) from turn summary.");
+            foreach (var (id, subject) in saved)
+                sb.AppendLine($"   • {id}: {subject}");
+            if (skipped.Count > 0)
+            {
+                sb.AppendLine($"\n⏭ Skipped {skipped.Count}:");
+                foreach (var (subject, reason) in skipped)
+                    sb.AppendLine($"   • {subject} — {reason}");
+            }
+            if (!_store.Backend.IsEnabled)
+                sb.AppendLine("\n⚠ Persistence is disabled — captures are in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist.");
+            return sb.ToString();
+        });
+    }
+
+    private static string? BuildProvenance(int linkedPr, string? linkedCommits)
+    {
+        var parts = new List<string>();
+        if (linkedPr > 0) parts.Add($"PR #{linkedPr}");
+        if (!string.IsNullOrWhiteSpace(linkedCommits))
+        {
+            var commits = linkedCommits
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (commits.Length > 0) parts.Add($"commits {string.Join(", ", commits)}");
+        }
+        if (parts.Count == 0) return null;
+        return $"provenance: {string.Join(", ", parts)}\ncaptured: {DateTimeOffset.UtcNow:O}";
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "...";
+
     internal static MemoryStatus GetStatus()
     {
         return _store.WithFreshState(memories =>

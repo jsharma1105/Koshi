@@ -1,7 +1,7 @@
 // Smoke test for the Koshi MCP server.
 //
 // Spawns the server (via `dotnet <dll>` or directly as an AOT binary),
-// performs the MCP handshake, then exercises every one of the 20 tools
+// performs the MCP handshake, then exercises every one of the 24 tools
 // plus three bad-argument paths. Exit code = number of failures (so
 // 0 == clean run, anything else => CI fails).
 //
@@ -438,6 +438,7 @@ else
         "koshi_index", "koshi_index_directory", "koshi_search", "koshi_list_indexed", "koshi_clear_index",
         "koshi_remember", "koshi_recall", "koshi_memory_stats", "koshi_forget", "koshi_clear_memories",
         "koshi_memory_export_to_vault", "koshi_memory_import_from_vault", "koshi_memory_sync_vault",
+        "koshi_capture_turn",
         "koshi_compile_context", "koshi_token_count", "koshi_budget_plan",
         "koshi_register_team", "koshi_score_turn", "koshi_team_dashboard", "koshi_analyze_feedback", "koshi_list_teams",
         "koshi_version", "koshi_health",
@@ -744,6 +745,28 @@ await ExpectSuccessAsync("koshi_recall", "koshi_recall", new { query = "smoke", 
 await ExpectSuccessAsync("koshi_memory_stats", "koshi_memory_stats", new { });
 await ExpectSuccessAsync("koshi_forget", "koshi_forget", new { subject = "smoke" });
 await ExpectSuccessAsync("koshi_clear_memories", "koshi_clear_memories", new { confirm = true });
+
+// koshi_capture_turn — positive case: explicit decision-shape sentence persists as a Decision memory.
+await ExpectSuccessAsync("koshi_capture_turn", "koshi_capture_turn", new
+{
+    turn_summary = "Investigated a flaky deadlock in the smoke harness. We chose retry-with-backoff over circuit-breaker because the dependency recovers within five seconds.",
+    linked_pr = 9999,
+});
+
+// koshi_capture_turn — preview mode (auto_promote=false). Should return candidates without saving.
+await ExpectSuccessAsync("koshi_capture_turn-preview", "koshi_capture_turn", new
+{
+    turn_summary = "Decision: switch the cache layer from in-memory to Redis for the hot read path.",
+    auto_promote = false,
+});
+
+// koshi_capture_turn — chitchat case: extractor should find nothing and return the ℹ no-decisions message (still a successful response).
+await ExpectSuccessAsync("koshi_capture_turn-chitchat", "koshi_capture_turn", new
+{
+    turn_summary = "We talked about the weather and looked at some logs. Nothing was decided.",
+});
+
+await ExpectSuccessAsync("koshi_clear_memories-after-capture", "koshi_clear_memories", new { confirm = true });
 
 // v0.6.0 vault tools — sanity check that they're exposed and return a sensible response in JSON mode.
 await ExpectSuccessAsync("koshi_memory_sync_vault", "koshi_memory_sync_vault", new { });
