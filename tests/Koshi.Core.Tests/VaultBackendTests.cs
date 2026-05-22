@@ -3,18 +3,32 @@ using Koshi.Mcp.Internal;
 
 namespace Koshi.Core.Tests;
 
+// Serialize against other vault test classes — PR #41 made the 2-arg
+// VaultBackend ctor consult KOSHI_VAULT_FLAVOR, and VaultFlavorTests
+// mutates that env var mid-test. Without [Collection], xUnit can run
+// the constructors in parallel and our nulled-out env can be observed
+// as "logseq" by an unsuspecting test in this class.
+[Collection("VaultEnvVar")]
 public class VaultBackendTests : IDisposable
 {
     private readonly string _vault;
+    private readonly string? _origFlavorEnv;
 
     public VaultBackendTests()
     {
         _vault = Path.Combine(Path.GetTempPath(), "koshi-vaultbe-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_vault);
+        // The 2-arg VaultBackend ctor resolves layout from this env var
+        // (since PR #41). Null it out so these tests deterministically
+        // exercise the Obsidian (default) layout they were written for,
+        // regardless of the developer's shell environment.
+        _origFlavorEnv = Environment.GetEnvironmentVariable(VaultLayout.EnvVar);
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, null);
     }
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, _origFlavorEnv);
         try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
     }
 

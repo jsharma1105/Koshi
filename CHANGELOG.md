@@ -5,6 +5,80 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - Unreleased
+
+### Added
+- **Multi-flavor vault adapters — Obsidian, Foam, Logseq, Dendron.**
+  Selectable via `KOSHI_VAULT_FLAVOR=obsidian|foam|logseq|dendron`
+  (default: `obsidian`, same as v0.6.x). The wire format (YAML
+  frontmatter, identity, all field semantics) is identical across
+  flavors; only file naming and placement differ so Koshi-managed
+  memories sit naturally alongside whatever PKM tool the team already
+  uses.
+- New layout adapters:
+  - **Obsidian** (default) — `<vault>/koshi/{facts,decisions,patterns,preferences}/<slug>--<id>.md`. Backwards-compatible with v0.6.x vaults.
+  - **Foam** — identical on-disk layout to Obsidian (Foam is built on
+    Obsidian-compatible markdown). Diagnostics report `foam` so it's
+    distinguishable in `koshi_health`.
+  - **Logseq** — `<vault>/pages/koshi-<type>-<slug>--<id>.md` (flat).
+    Lives in Logseq's idiomatic `pages/` dir; the `koshi-` prefix keeps
+    Koshi files from colliding with the user's own Logseq pages.
+  - **Dendron** — `<vault>/koshi.<type>.<slug>--<id>.md` at the vault
+    root, matching Dendron's dot-namespaced hierarchy convention.
+- `koshi_health` reports the active vault flavor (`obsidian`/`foam`/`logseq`/`dendron`).
+- File-system watcher (v0.6.1) is flavor-aware: the watch scope, filter,
+  and recursion mode come from the adapter, so Logseq/Dendron watchers
+  don't fire on every user page edit — only on Koshi-owned files.
+
+### Changed
+- `VaultBackend` now delegates file layout to `IVaultLayoutAdapter`
+  selected at construction (via env var by default). All existing
+  enumeration / target-path / dir-creation code paths route through
+  the adapter; the wire format is unchanged.
+- `koshi_memory_export_to_vault` and `koshi_memory_import_from_vault`
+  accept a new `flavor` parameter (default `obsidian`) so the target
+  / source vault's layout is chosen explicitly, independent of the
+  active `KOSHI_VAULT_FLAVOR` env var. Without this, a user running
+  with `KOSHI_VAULT_FLAVOR=logseq` who imported a real Obsidian vault
+  saw "no managed memories found" because the import scanned
+  `<vault>/pages/` instead of `<vault>/koshi/<type>/`.
+
+### Fixed (review-pass on PR #41)
+- **Test-isolation regression in `VaultBackendTests` and `VaultWatcherTests`.**
+  The 2-arg `VaultBackend(string, bool)` constructor (used by the
+  pre-flavor test classes) used to be Obsidian-hardcoded; this PR
+  rewired it to read `KOSHI_VAULT_FLAVOR`. The legacy tests hardcode
+  Obsidian paths and weren't guarding the env var, so a developer
+  with `KOSHI_VAULT_FLAVOR=dendron` set in their shell would see
+  every test in those classes fail. Plus a parallel-test race:
+  `VaultFlavorTests.ResolveFromEnv_reads_env_var` mutates the env
+  var mid-test, and xUnit ran the constructors in parallel. Fixed
+  by capturing/nulling/restoring the env var in both setups and
+  putting all three vault-touching test classes in the same xUnit
+  `[Collection("VaultEnvVar")]` so they serialize. (Surfaced by
+  sonnet-review.)
+- **`MemoryTools.GetStatus` was reading `_store.Backend` four times
+  in the same record initializer.** A hypothetical future swap (lazy
+  init, reconnect) could let `VaultWatcherStatus` and `VaultFlavor`
+  observe different instances and silently disagree on whether the
+  backend is a vault. Cached the property in a local. (Surfaced by
+  sonnet-review.)
+
+### Migration
+- Users on v0.6.x with the default Obsidian layout: **no action needed.**
+  The default flavor stays `obsidian` and the on-disk format is
+  byte-identical.
+- Users wanting to switch flavors: export from old vault, set
+  `KOSHI_VAULT_FLAVOR` to the new flavor, point `KOSHI_MEMORY_VAULT` at
+  a fresh directory, and run `koshi_memory_import_from_vault` from the
+  old vault. (Cross-flavor in-place migration is not automatic — keep
+  the old vault until you've verified the new one.)
+
+### Unknown-flavor handling
+- Setting `KOSHI_VAULT_FLAVOR` to an unrecognized value logs a single
+  stderr warning and falls back to `obsidian`. The server never fails
+  to start because of a bad flavor name.
+
 ## [0.6.1] - Unreleased
 
 ### Added
