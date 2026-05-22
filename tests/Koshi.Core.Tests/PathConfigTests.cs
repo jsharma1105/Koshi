@@ -29,7 +29,7 @@ public sealed class PathConfigTests
     [Fact]
     public void Explicit_root_overrides_current_directory()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"koshi-pathconfig-{Guid.NewGuid():N}");
+        var tmp = Path.Join(Path.GetTempPath(), $"koshi-pathconfig-{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(tmp);
@@ -77,7 +77,7 @@ public sealed class PathConfigTests
         }));
 
         Assert.False(cfg.IndexFileFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, ".koshi", "index.json")), cfg.IndexFile);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, ".koshi", "index.json")), cfg.IndexFile);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class PathConfigTests
         }));
 
         Assert.False(cfg.MemoryFileFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, ".koshi", "memory.json")), cfg.MemoryFile);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, ".koshi", "memory.json")), cfg.MemoryFile);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public sealed class PathConfigTests
         }));
 
         Assert.True(cfg.MemoryVaultFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, "team-vault")), cfg.MemoryVault);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, "team-vault")), cfg.MemoryVault);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class PathConfigTests
         }));
 
         Assert.True(cfg.IndexFileFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, "build", "index.json")), cfg.IndexFile);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, "build", "index.json")), cfg.IndexFile);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class PathConfigTests
         }));
 
         Assert.False(cfg.MemoryFileFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, ".koshi", "memory.json")), cfg.MemoryFile);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, ".koshi", "memory.json")), cfg.MemoryFile);
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public sealed class PathConfigTests
             ["KOSHI_PROJECT_ROOT"] = root
         }));
 
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, "src")), cfg.ResolveUserPath("src"));
+        Assert.Equal(Path.GetFullPath(Path.Join(root, "src")), cfg.ResolveUserPath("src"));
     }
 
     [Fact]
@@ -246,13 +246,13 @@ public sealed class PathConfigTests
         }));
 
         Assert.True(cfg.IndexFileFromEnv);
-        Assert.Equal(Path.GetFullPath(Path.Combine(root, "team", "index.json")), cfg.IndexFile);
+        Assert.Equal(Path.GetFullPath(Path.Join(root, "team", "index.json")), cfg.IndexFile);
     }
 
     [Fact]
     public void Default_state_dir_gitignore_is_seeded_when_using_defaults()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"koshi-pc-gitignore-{Guid.NewGuid():N}");
+        var tmp = Path.Join(Path.GetTempPath(), $"koshi-pc-gitignore-{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(tmp);
@@ -263,7 +263,7 @@ public sealed class PathConfigTests
 
             cfg.EnsureStateDirGitIgnore();
 
-            var gitignore = Path.Combine(tmp, ".koshi", ".gitignore");
+            var gitignore = Path.Join(tmp, ".koshi", ".gitignore");
             Assert.True(File.Exists(gitignore), $"expected {gitignore} to be created");
             var content = File.ReadAllText(gitignore);
             Assert.Contains("*", content, StringComparison.Ordinal);
@@ -278,11 +278,11 @@ public sealed class PathConfigTests
     [Fact]
     public void Existing_gitignore_is_preserved()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"koshi-pc-gitignore-keep-{Guid.NewGuid():N}");
+        var tmp = Path.Join(Path.GetTempPath(), $"koshi-pc-gitignore-keep-{Guid.NewGuid():N}");
         try
         {
-            Directory.CreateDirectory(Path.Combine(tmp, ".koshi"));
-            var gitignore = Path.Combine(tmp, ".koshi", ".gitignore");
+            Directory.CreateDirectory(Path.Join(tmp, ".koshi"));
+            var gitignore = Path.Join(tmp, ".koshi", ".gitignore");
             File.WriteAllText(gitignore, "# user-custom\n!memory.json\n");
 
             var cfg = new PathConfig(EnvFrom(new Dictionary<string, string?> {
@@ -302,12 +302,12 @@ public sealed class PathConfigTests
     [Fact]
     public void Gitignore_NOT_seeded_when_user_overrode_paths()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"koshi-pc-gitignore-skip-{Guid.NewGuid():N}");
+        var tmp = Path.Join(Path.GetTempPath(), $"koshi-pc-gitignore-skip-{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(tmp);
-            var externalMem = Path.Combine(Path.GetTempPath(), $"koshi-extmem-{Guid.NewGuid():N}.json");
-            var externalIdx = Path.Combine(Path.GetTempPath(), $"koshi-extidx-{Guid.NewGuid():N}.json");
+            var externalMem = Path.Join(Path.GetTempPath(), $"koshi-extmem-{Guid.NewGuid():N}.json");
+            var externalIdx = Path.Join(Path.GetTempPath(), $"koshi-extidx-{Guid.NewGuid():N}.json");
 
             var cfg = new PathConfig(EnvFrom(new Dictionary<string, string?> {
                 ["KOSHI_PROJECT_ROOT"] = tmp,
@@ -318,7 +318,7 @@ public sealed class PathConfigTests
 
             // No default state dir means no auto-gitignore (and no surprise
             // dir creation in a user-explicit setup).
-            Assert.False(Directory.Exists(Path.Combine(tmp, ".koshi")));
+            Assert.False(Directory.Exists(Path.Join(tmp, ".koshi")));
         }
         finally
         {

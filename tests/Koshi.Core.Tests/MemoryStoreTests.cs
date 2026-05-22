@@ -9,13 +9,14 @@ public class MemoryStoreTests : IDisposable
 
     public MemoryStoreTests()
     {
-        _vault = Path.Combine(Path.GetTempPath(), "koshi-store-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        _vault = Path.Join(Path.GetTempPath(), "koshi-store-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_vault);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_vault, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
     private static MemoryRecord Make(string id, string subject = "x") => new()
@@ -49,7 +50,7 @@ public class MemoryStoreTests : IDisposable
     public void AllocateId_continues_past_max_existing_id()
     {
         // Seed backend with mem-000050.
-        var path = Path.Combine(_vault, "memory.json");
+        var path = Path.Join(_vault, "memory.json");
         var json = new JsonFileBackend(path);
         json.Upsert(Make("mem-000050"), [Make("mem-000050")]);
 
@@ -70,9 +71,9 @@ public class MemoryStoreTests : IDisposable
         Assert.Equal(0, store.WithFreshState(m => m.Count));
 
         // Externally drop a valid memory file.
-        Directory.CreateDirectory(Path.Combine(_vault, "koshi", "facts"));
+        Directory.CreateDirectory(Path.Join(_vault, "koshi", "facts"));
         File.WriteAllText(
-            Path.Combine(_vault, "koshi", "facts", "ext--mem-000123.md"),
+            Path.Join(_vault, "koshi", "facts", "ext--mem-000123.md"),
             "---\n" +
             "koshi:\n" +
             "  id: mem-000123\n" +
@@ -100,9 +101,9 @@ public class MemoryStoreTests : IDisposable
         var store = new MemoryStore(be);
 
         // External agent drops a memory at mem-000777.
-        Directory.CreateDirectory(Path.Combine(_vault, "koshi", "facts"));
+        Directory.CreateDirectory(Path.Join(_vault, "koshi", "facts"));
         File.WriteAllText(
-            Path.Combine(_vault, "koshi", "facts", "ext--mem-000777.md"),
+            Path.Join(_vault, "koshi", "facts", "ext--mem-000777.md"),
             "---\n" +
             "koshi:\n" +
             "  id: mem-000777\n" +
@@ -143,7 +144,7 @@ public class MemoryStoreTests : IDisposable
         });
 
         // External deletion of mem-000001's file.
-        var deletedPath = Path.Combine(_vault, "koshi", "facts", "a--mem-000001.md");
+        var deletedPath = Path.Join(_vault, "koshi", "facts", "a--mem-000001.md");
         Assert.True(File.Exists(deletedPath));
         File.Delete(deletedPath);
 
@@ -168,7 +169,7 @@ public class MemoryStoreTests : IDisposable
     [Fact]
     public void Json_mode_does_not_reload_per_call()
     {
-        var path = Path.Combine(_vault, "memory.json");
+        var path = Path.Join(_vault, "memory.json");
         var be = new JsonFileBackend(path);
         var store = new MemoryStore(be);
 
@@ -191,7 +192,7 @@ public class MemoryStoreTests : IDisposable
     [Fact]
     public void ReplaceAll_resets_state_and_disk()
     {
-        var path = Path.Combine(_vault, "memory.json");
+        var path = Path.Join(_vault, "memory.json");
         var store = new MemoryStore(new JsonFileBackend(path));
 
         store.WithFreshState(memories =>

@@ -14,7 +14,7 @@ public class VaultWatcherTests : IDisposable
 
     public VaultWatcherTests()
     {
-        _vault = Path.Combine(Path.GetTempPath(), "koshi-vaultwatch-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        _vault = Path.Join(Path.GetTempPath(), "koshi-vaultwatch-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_vault);
         _origEnv = Environment.GetEnvironmentVariable("KOSHI_VAULT_WATCH");
         Environment.SetEnvironmentVariable("KOSHI_VAULT_WATCH", null);
@@ -30,7 +30,8 @@ public class VaultWatcherTests : IDisposable
     {
         Environment.SetEnvironmentVariable("KOSHI_VAULT_WATCH", _origEnv);
         Environment.SetEnvironmentVariable(VaultLayout.EnvVar, _origFlavorEnv);
-        try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_vault, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
     private static MemoryRecord Make(string id, string subject) => new()
@@ -135,7 +136,7 @@ public class VaultWatcherTests : IDisposable
         using var be = new VaultBackend(_vault);
         _ = be.ShouldReload();
 
-        var path = Path.Combine(be.KoshiDir, "facts", $"external-{Guid.NewGuid():N}.md");
+        var path = Path.Join(be.KoshiDir, "facts", $"external-{Guid.NewGuid():N}.md");
         File.WriteAllText(path,
             "---\nkoshi:\n  id: mem-999999\n  type: Fact\n  subject: external\n  scope:\n    userId: '*'\n    workspaceId: default\n  source: user\n  confidence: 0.8\n  createdAt: 2026-05-22T00:00:00Z\n  lastAccessedAt: 2026-05-22T00:00:00Z\n  accessCount: 0\n  tier: Hot\n---\nBody.\n");
 
@@ -147,9 +148,9 @@ public class VaultWatcherTests : IDisposable
     public void External_file_delete_marks_cache_dirty()
     {
         // Pre-seed a file before the backend attaches its watcher.
-        var seededDir = Path.Combine(_vault, "koshi", "facts");
+        var seededDir = Path.Join(_vault, "koshi", "facts");
         Directory.CreateDirectory(seededDir);
-        var seededPath = Path.Combine(seededDir, "seeded-for-delete.md");
+        var seededPath = Path.Join(seededDir, "seeded-for-delete.md");
         File.WriteAllText(seededPath,
             "---\nkoshi:\n  id: mem-888888\n  type: Fact\n  subject: seeded\n  scope:\n    userId: '*'\n    workspaceId: default\n  source: user\n  confidence: 0.8\n  createdAt: 2026-05-22T00:00:00Z\n  lastAccessedAt: 2026-05-22T00:00:00Z\n  accessCount: 0\n  tier: Hot\n---\nBody.\n");
 

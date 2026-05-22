@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security;
 using Koshi.Core.Memory;
 using Koshi.Core.Models;
 using Koshi.Core.Retrieval;
@@ -108,7 +109,9 @@ public sealed class MemoryTools
                     embeddingModel = provider.ModelName;
                     embeddingDims = provider.Dimensions;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (
+                    ex is not OutOfMemoryException and not StackOverflowException
+                       and not ThreadAbortException)
                 {
                     embedNote = $"embedSelf=true failed: {ex.Message}";
                 }
@@ -414,9 +417,12 @@ public sealed class MemoryTools
 
         VaultBackend target;
         try { target = new VaultBackend(resolved, watch: false, layout: layout); }
-        catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or ArgumentException or NotSupportedException or PathTooLongException)
+        { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
-        try
+        using (target)
         {
             var existing = target.LoadAll();
             if (existing.Count > 0 && !overwrite)
@@ -427,7 +433,6 @@ public sealed class MemoryTools
             target.ReplaceAll(snapshot);
             return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
         }
-        finally { target.Dispose(); }
     }
 
     [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
@@ -453,9 +458,12 @@ public sealed class MemoryTools
 
         VaultBackend source;
         try { source = new VaultBackend(resolved, watch: false, layout: layout); }
-        catch (Exception ex) { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or ArgumentException or NotSupportedException or PathTooLongException)
+        { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
 
-        try
+        using (source)
         {
             var incoming = source.LoadAll();
             if (incoming.Count == 0)
@@ -498,7 +506,6 @@ public sealed class MemoryTools
                 return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
             });
         }
-        finally { source.Dispose(); }
     }
 
     [McpServerTool(Name = "koshi_memory_sync_vault"), Description(

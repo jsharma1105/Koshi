@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security;
 using System.Text;
 using Koshi.Core.Memory;
 
@@ -38,7 +39,9 @@ internal sealed class VaultDocument
     {
         string text;
         try { text = File.ReadAllText(path); }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or NotSupportedException)
         {
             Console.Error.WriteLine($"[koshi] Failed to read '{path}': {ex.Message}");
             return null;
@@ -61,7 +64,9 @@ internal sealed class VaultDocument
             var record = data.ToRecord(subject, content);
             return new VaultDocument { Record = record, OtherFrontmatterText = otherFmText };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is ArgumentException or InvalidOperationException or FormatException
+                or OverflowException)
         {
             Console.Error.WriteLine($"[koshi] Failed to materialize record from '{path}': {ex.Message}");
             return null;
@@ -332,22 +337,18 @@ internal sealed class VaultDocument
 
         // Validate required keys.
         string[] requiredTop = ["id", "type", "scope", "source", "confidence", "created-at", "last-accessed-at", "access-count", "tier"];
-        foreach (var req in requiredTop)
+        var missingTop = requiredTop.FirstOrDefault(req => !seen.Contains(req));
+        if (missingTop is not null)
         {
-            if (!seen.Contains(req))
-            {
-                Warn(path, $"missing required koshi key '{req}'");
-                return false;
-            }
+            Warn(path, $"missing required koshi key '{missingTop}'");
+            return false;
         }
         string[] requiredScope = ["user", "workspace"];
-        foreach (var req in requiredScope)
+        var missingScope = requiredScope.FirstOrDefault(req => !scopeSeen.Contains(req));
+        if (missingScope is not null)
         {
-            if (!scopeSeen.Contains(req))
-            {
-                Warn(path, $"missing required scope key '{req}'");
-                return false;
-            }
+            Warn(path, $"missing required scope key '{missingScope}'");
+            return false;
         }
 
         return true;
@@ -397,7 +398,9 @@ internal sealed class VaultDocument
                     return false;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is FormatException or ArgumentException or OverflowException
+                or InvalidOperationException)
         {
             Warn(path, $"could not parse '{key}': {ex.Message}");
             return false;
@@ -477,7 +480,7 @@ internal sealed class VaultDocument
     {
         sb.Append("koshi:\n");
         sb.Append("  id: ").Append(YamlString(r.Id)).Append('\n');
-        sb.Append("  type: ").Append(r.Type.ToString()).Append('\n');
+        sb.Append("  type: ").Append(r.Type).Append('\n');
         sb.Append("  scope:\n");
         sb.Append("    user: ").Append(YamlString(r.Scope.UserId)).Append('\n');
         sb.Append("    workspace: ").Append(YamlString(r.Scope.WorkspaceId)).Append('\n');
@@ -488,7 +491,7 @@ internal sealed class VaultDocument
         sb.Append("  updated-at: ").Append(DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)).Append('\n');
         sb.Append("  last-accessed-at: ").Append(r.LastAccessedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)).Append('\n');
         sb.Append("  access-count: ").Append(r.AccessCount.ToString(CultureInfo.InvariantCulture)).Append('\n');
-        sb.Append("  tier: ").Append(r.Tier.ToString()).Append('\n');
+        sb.Append("  tier: ").Append(r.Tier).Append('\n');
         if (r.SupersededBy is not null)
             sb.Append("  superseded-by: ").Append(YamlString(r.SupersededBy)).Append('\n');
         if (r.ContradictionNote is not null)
@@ -513,12 +516,7 @@ internal sealed class VaultDocument
         if (s.Equals("no", StringComparison.OrdinalIgnoreCase)) return true;
         if (s[0] == ' ' || s[^1] == ' ') return true;
         if (s[0] is '!' or '&' or '*' or '%' or '@' or '`' or '#' or '|' or '>' or '?' or '-') return true;
-        foreach (var c in s)
-        {
-            if (c == ':' || c == '"' || c == '\'' || c == '[' || c == ']' || c == '{' || c == '}' || c == ',' || c == '#' || c == '\n' || c == '\r' || c == '\t' || c == '\\')
-                return true;
-        }
-        return false;
+        return s.Any(c => c is ':' or '"' or '\'' or '[' or ']' or '{' or '}' or ',' or '#' or '\n' or '\r' or '\t' or '\\');
     }
 
     // ---------- body parsing ----------

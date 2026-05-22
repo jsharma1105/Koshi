@@ -16,7 +16,7 @@ public class VaultFlavorTests : IDisposable
 
     public VaultFlavorTests()
     {
-        _vault = Path.Combine(Path.GetTempPath(), "koshi-vaultflavor-" + Guid.NewGuid().ToString("N")[..8]);
+        _vault = Path.Join(Path.GetTempPath(), "koshi-vaultflavor-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_vault);
         _origFlavorEnv = Environment.GetEnvironmentVariable(VaultLayout.EnvVar);
         Environment.SetEnvironmentVariable(VaultLayout.EnvVar, null);
@@ -25,7 +25,8 @@ public class VaultFlavorTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(VaultLayout.EnvVar, _origFlavorEnv);
-        try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_vault, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
     private static MemoryRecord Make(string id, MemoryType type, string subject) => new()
@@ -87,7 +88,7 @@ public class VaultFlavorTests : IDisposable
 
         be.Upsert(rec, [rec]);
 
-        var expected = Path.Combine(_vault, "koshi", "facts", "obsidian-test--mem-000001.md");
+        var expected = Path.Join(_vault, "koshi", "facts", "obsidian-test--mem-000001.md");
         Assert.True(File.Exists(expected), $"Expected file at: {expected}");
     }
 
@@ -115,7 +116,7 @@ public class VaultFlavorTests : IDisposable
         be.Upsert(rec, [rec]);
 
         // Same file path as Obsidian — Foam reads the same vault as Obsidian.
-        var expected = Path.Combine(_vault, "koshi", "facts", "foam-test--mem-000001.md");
+        var expected = Path.Join(_vault, "koshi", "facts", "foam-test--mem-000001.md");
         Assert.True(File.Exists(expected));
 
         // Cross-flavor read: a Foam-written vault is readable by Obsidian and vice-versa.
@@ -135,11 +136,11 @@ public class VaultFlavorTests : IDisposable
 
         be.Upsert(rec, [rec]);
 
-        var expected = Path.Combine(_vault, "pages", "koshi-decision-use-logseq--mem-000001.md");
+        var expected = Path.Join(_vault, "pages", "koshi-decision-use-logseq--mem-000001.md");
         Assert.True(File.Exists(expected), $"Expected file at: {expected}");
 
         // No nested koshi/ directory should have been created.
-        Assert.False(Directory.Exists(Path.Combine(_vault, "koshi")));
+        Assert.False(Directory.Exists(Path.Join(_vault, "koshi")));
     }
 
     [Fact]
@@ -157,11 +158,11 @@ public class VaultFlavorTests : IDisposable
     public void Logseq_layout_ignores_user_pages_without_koshi_prefix()
     {
         using var be = new VaultBackend(_vault, watch: false, new LogseqLayout());
-        Directory.CreateDirectory(Path.Combine(_vault, "pages"));
+        Directory.CreateDirectory(Path.Join(_vault, "pages"));
 
         // User's own Logseq page — should never appear in LoadAll output.
         File.WriteAllText(
-            Path.Combine(_vault, "pages", "my-personal-notes.md"),
+            Path.Join(_vault, "pages", "my-personal-notes.md"),
             "# My Personal Notes\n\n- not a koshi memory\n");
 
         be.Upsert(Make("mem-000001", MemoryType.Fact, "real koshi"), []);
@@ -181,11 +182,11 @@ public class VaultFlavorTests : IDisposable
 
         be.Upsert(rec, [rec]);
 
-        var expected = Path.Combine(_vault, "koshi.pattern.dendron-note--mem-000001.md");
+        var expected = Path.Join(_vault, "koshi.pattern.dendron-note--mem-000001.md");
         Assert.True(File.Exists(expected), $"Expected file at: {expected}");
 
         // Dendron should NOT create the koshi/ subdir.
-        Assert.False(Directory.Exists(Path.Combine(_vault, "koshi")));
+        Assert.False(Directory.Exists(Path.Join(_vault, "koshi")));
     }
 
     [Fact]
@@ -206,7 +207,7 @@ public class VaultFlavorTests : IDisposable
 
         // User's own Dendron note at the root.
         File.WriteAllText(
-            Path.Combine(_vault, "my.personal.note.md"),
+            Path.Join(_vault, "my.personal.note.md"),
             "# My Note\n\nNot a koshi memory.\n");
 
         be.Upsert(Make("mem-000001", MemoryType.Fact, "real koshi"), []);
@@ -276,9 +277,9 @@ public class VaultFlavorTests : IDisposable
     public void Logseq_ReplaceAll_leaves_user_pages_intact()
     {
         using var be = new VaultBackend(_vault, watch: false, new LogseqLayout());
-        Directory.CreateDirectory(Path.Combine(_vault, "pages"));
+        Directory.CreateDirectory(Path.Join(_vault, "pages"));
 
-        var userPage = Path.Combine(_vault, "pages", "untouched.md");
+        var userPage = Path.Join(_vault, "pages", "untouched.md");
         File.WriteAllText(userPage, "# untouched");
         var koshiOldRec = Make("mem-000001", MemoryType.Fact, "old");
         be.Upsert(koshiOldRec, [koshiOldRec]);
@@ -287,8 +288,8 @@ public class VaultFlavorTests : IDisposable
         be.ReplaceAll([koshiNewRec]);
 
         Assert.True(File.Exists(userPage), "User page must survive ReplaceAll.");
-        Assert.False(File.Exists(Path.Combine(_vault, "pages", "koshi-fact-old--mem-000001.md")));
-        Assert.True(File.Exists(Path.Combine(_vault, "pages", "koshi-decision-new--mem-000002.md")));
+        Assert.False(File.Exists(Path.Join(_vault, "pages", "koshi-fact-old--mem-000001.md")));
+        Assert.True(File.Exists(Path.Join(_vault, "pages", "koshi-decision-new--mem-000002.md")));
     }
 
     [Fact]
@@ -296,7 +297,7 @@ public class VaultFlavorTests : IDisposable
     {
         using var be = new VaultBackend(_vault, watch: false, new DendronLayout());
 
-        var userNote = Path.Combine(_vault, "my.note.md");
+        var userNote = Path.Join(_vault, "my.note.md");
         File.WriteAllText(userNote, "# my note");
         var rec = Make("mem-000001", MemoryType.Fact, "first");
         be.Upsert(rec, [rec]);
@@ -304,8 +305,8 @@ public class VaultFlavorTests : IDisposable
         be.ReplaceAll([Make("mem-000002", MemoryType.Decision, "second")]);
 
         Assert.True(File.Exists(userNote), "User note must survive ReplaceAll.");
-        Assert.False(File.Exists(Path.Combine(_vault, "koshi.fact.first--mem-000001.md")));
-        Assert.True(File.Exists(Path.Combine(_vault, "koshi.decision.second--mem-000002.md")));
+        Assert.False(File.Exists(Path.Join(_vault, "koshi.fact.first--mem-000001.md")));
+        Assert.True(File.Exists(Path.Join(_vault, "koshi.decision.second--mem-000002.md")));
     }
 
     // ─── Watcher specs are flavor-appropriate ──────────────────────────
@@ -316,7 +317,7 @@ public class VaultFlavorTests : IDisposable
         var layout = new ObsidianLayout();
         var spec = layout.WatcherSpec(_vault);
         Assert.NotNull(spec);
-        Assert.Equal(Path.Combine(_vault, "koshi"), spec!.Value.watchDir);
+        Assert.Equal(Path.Join(_vault, "koshi"), spec!.Value.watchDir);
         Assert.True(spec.Value.recursive);
         Assert.Equal("*.md", spec.Value.filter);
     }
@@ -327,7 +328,7 @@ public class VaultFlavorTests : IDisposable
         var layout = new LogseqLayout();
         var spec = layout.WatcherSpec(_vault);
         Assert.NotNull(spec);
-        Assert.Equal(Path.Combine(_vault, "pages"), spec!.Value.watchDir);
+        Assert.Equal(Path.Join(_vault, "pages"), spec!.Value.watchDir);
         Assert.False(spec.Value.recursive);
         Assert.Equal("koshi-*.md", spec.Value.filter);
     }
@@ -365,9 +366,9 @@ public class VaultFlavorTests : IDisposable
         be.Upsert(Make("mem-000001", MemoryType.Fact, "explicit wins"), []);
 
         // Wrote to obsidian's koshi/facts/ dir even though env says logseq.
-        var expected = Path.Combine(_vault, "koshi", "facts", "explicit-wins--mem-000001.md");
+        var expected = Path.Join(_vault, "koshi", "facts", "explicit-wins--mem-000001.md");
         Assert.True(File.Exists(expected), $"Expected obsidian-layout file at: {expected}");
-        Assert.False(Directory.Exists(Path.Combine(_vault, "pages")),
+        Assert.False(Directory.Exists(Path.Join(_vault, "pages")),
             "logseq's pages/ dir must not be created when explicit layout is obsidian.");
     }
 

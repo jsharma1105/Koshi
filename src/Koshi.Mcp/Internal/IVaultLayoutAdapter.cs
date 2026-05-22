@@ -88,17 +88,17 @@ internal class ObsidianLayout : IVaultLayoutAdapter
 {
     public virtual string FlavorName => "obsidian";
 
-    public string KoshiDir(string vaultRoot) => Path.Combine(vaultRoot, "koshi");
+    public string KoshiDir(string vaultRoot) => Path.Join(vaultRoot, "koshi");
 
     public void EnsureDirs(string vaultRoot)
     {
         var dir = KoshiDir(vaultRoot);
         Directory.CreateDirectory(dir);
         foreach (MemoryType t in Enum.GetValues<MemoryType>())
-            Directory.CreateDirectory(Path.Combine(dir, TypeSubdir(t)));
+            Directory.CreateDirectory(Path.Join(dir, TypeSubdir(t)));
     }
 
-    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Combine(
+    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Join(
         KoshiDir(vaultRoot),
         TypeSubdir(record.Type),
         $"{Slug.Make(record.Subject)}--{record.Id}.md");
@@ -141,11 +141,11 @@ internal sealed class LogseqLayout : IVaultLayoutAdapter
 {
     public string FlavorName => "logseq";
 
-    public string PagesDir(string vaultRoot) => Path.Combine(vaultRoot, "pages");
+    public string PagesDir(string vaultRoot) => Path.Join(vaultRoot, "pages");
 
     public void EnsureDirs(string vaultRoot) => Directory.CreateDirectory(PagesDir(vaultRoot));
 
-    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Combine(
+    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Join(
         PagesDir(vaultRoot),
         $"koshi-{TypeStem(record.Type)}-{Slug.Make(record.Subject)}--{record.Id}.md");
 
@@ -179,7 +179,7 @@ internal sealed class DendronLayout : IVaultLayoutAdapter
 
     public void EnsureDirs(string vaultRoot) => Directory.CreateDirectory(vaultRoot);
 
-    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Combine(
+    public string TargetPath(string vaultRoot, MemoryRecord record) => Path.Join(
         vaultRoot,
         $"koshi.{TypeStem(record.Type)}.{Slug.Make(record.Subject)}--{record.Id}.md");
 

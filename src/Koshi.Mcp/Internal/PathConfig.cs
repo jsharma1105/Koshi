@@ -1,3 +1,5 @@
+using System.Security;
+
 namespace Koshi.Mcp.Internal;
 
 /// <summary>
@@ -79,7 +81,10 @@ internal sealed class PathConfig
     private static PathConfig BuildSafeDefault()
     {
         try { return new PathConfig(); }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is ArgumentException or IOException or UnauthorizedAccessException
+                or SecurityException or NotSupportedException or InvalidOperationException
+                or PathTooLongException or FormatException)
         {
             Console.Error.WriteLine(
                 $"[koshi] WARN: PathConfig defaults failed to initialise ({ex.GetType().Name}: {ex.Message}). " +
@@ -157,11 +162,11 @@ internal sealed class PathConfig
 
         (IndexFile, IndexFileFromEnv) = Resolve(
             envReader("KOSHI_INDEX_FILE"),
-            defaultValue: Path.Combine(ProjectRoot, ".koshi", "index.json"));
+            defaultValue: Path.Join(ProjectRoot, ".koshi", "index.json"));
 
         (MemoryFile, MemoryFileFromEnv) = Resolve(
             envReader("KOSHI_MEMORY_FILE"),
-            defaultValue: Path.Combine(ProjectRoot, ".koshi", "memory.json"));
+            defaultValue: Path.Join(ProjectRoot, ".koshi", "memory.json"));
 
         // Vault stays opt-in — no default. Setting any non-empty value enables
         // vault mode; relative paths resolve against the project root.
@@ -243,7 +248,7 @@ internal sealed class PathConfig
         // Only act when the user is relying on our defaults under .koshi/.
         // If they pointed KOSHI_MEMORY_FILE somewhere else explicitly, hands
         // off — they've made their own commit/ignore decisions.
-        var defaultStateDir = Path.Combine(ProjectRoot, ".koshi");
+        var defaultStateDir = Path.Join(ProjectRoot, ".koshi");
         var memoryUsesDefault = !MemoryFileFromEnv &&
             string.Equals(Path.GetDirectoryName(MemoryFile), defaultStateDir, StringComparison.OrdinalIgnoreCase);
         var indexUsesDefault = !IndexFileFromEnv &&
@@ -254,7 +259,7 @@ internal sealed class PathConfig
         try
         {
             Directory.CreateDirectory(defaultStateDir);
-            var gitignore = Path.Combine(defaultStateDir, ".gitignore");
+            var gitignore = Path.Join(defaultStateDir, ".gitignore");
             if (!File.Exists(gitignore))
             {
                 File.WriteAllText(gitignore,

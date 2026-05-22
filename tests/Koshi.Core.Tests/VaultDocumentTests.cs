@@ -9,16 +9,17 @@ public class VaultDocumentTests : IDisposable
 
     public VaultDocumentTests()
     {
-        _tmpDir = Path.Combine(Path.GetTempPath(), "koshi-vaultdoc-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        _tmpDir = Path.Join(Path.GetTempPath(), "koshi-vaultdoc-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tmpDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tmpDir, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_tmpDir, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { _ = ex; }
     }
 
-    private string TempFile(string name) => Path.Combine(_tmpDir, name);
+    private string TempFile(string name) => Path.Join(_tmpDir, name);
 
     private static MemoryRecord SampleRecord(string id = "mem-000001", string subject = "Sample subject", string content = "Sample body content.")
     {
