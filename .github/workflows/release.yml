@@ -209,7 +209,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -314,7 +314,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download release-assets (manifest.json)
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: release-assets
           path: artifacts
