@@ -921,12 +921,12 @@ try
 
     // Assert file layout.
     var koshiRoot = Path.Join(vaultDir, "koshi");
-    foreach (var dir in new[] { "facts", "decisions", "patterns" }.Select(sub => Path.Join(koshiRoot, sub)))
+    var missingDirs = new[] { "facts", "decisions", "patterns" }
+        .Select(sub => Path.Join(koshiRoot, sub))
+        .Where(dir => !Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*.md").Any());
+    foreach (var dir in missingDirs)
     {
-        if (!Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*.md").Any())
-        {
-            failures.Add($"vault: expected at least one .md under {dir}");
-        }
+        failures.Add($"vault: expected at least one .md under {dir}");
     }
 
     // Stats should report backend == vault.
