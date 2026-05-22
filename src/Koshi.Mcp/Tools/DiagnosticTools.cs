@@ -70,6 +70,11 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    KOSHI_MEMORY_FILE:  {paths.MemoryFile}  [{PathConfig.SourceLabel(paths.MemoryFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_MEMORY_VAULT: {paths.MemoryVault ?? "(unset)"}  [{(paths.MemoryVaultFromEnv ? "env" : "default")}]");
         sb.AppendLine($"    KOSHI_TOKENIZER_MODEL: {Koshi.Core.Tokenization.TokenCounters.ModelName}");
+        var embedProvider = Koshi.Core.Retrieval.EmbeddingProviderRegistry.Current;
+        if (embedProvider is null)
+            sb.AppendLine("    Embedding provider:    not configured (BM25-only)");
+        else
+            sb.AppendLine($"    Embedding provider:    {embedProvider.ModelName} (dim={embedProvider.Dimensions})");
         sb.AppendLine();
 
         var uptime = DateTimeOffset.UtcNow - _startedAt;

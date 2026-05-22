@@ -72,7 +72,9 @@ public sealed class MemoryTools
         [Description("Optional workspace identifier. Defaults to 'default'.")]
         string? workspaceId = null,
         [Description("Optional thread identifier for conversation-scoped memories.")]
-        string? threadId = null)
+        string? threadId = null,
+        [Description("If true and an IEmbeddingProvider is registered (see koshi_health), embed the content and store the vector alongside the memory for future hybrid recall. Default: false. No-op when no provider is configured.")]
+        bool embedSelf = false)
     {
         if (string.IsNullOrWhiteSpace(content))
             return "❌ Content must not be empty.";
@@ -86,6 +88,32 @@ public sealed class MemoryTools
             UserId: string.IsNullOrWhiteSpace(userId) ? "*" : userId.Trim(),
             WorkspaceId: string.IsNullOrWhiteSpace(workspaceId) ? "default" : workspaceId.Trim(),
             ThreadId: string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim());
+
+        float[]? embedding = null;
+        string? embeddingModel = null;
+        int embeddingDims = 0;
+        string? embedNote = null;
+        if (embedSelf)
+        {
+            var provider = Koshi.Core.Retrieval.EmbeddingProviderRegistry.Current;
+            if (provider is null)
+            {
+                embedNote = "embedSelf=true ignored: no IEmbeddingProvider registered (install Koshi.Embeddings.* and set KOSHI_EMBEDDING_PROVIDER).";
+            }
+            else
+            {
+                try
+                {
+                    embedding = provider.EmbedAsync(content).GetAwaiter().GetResult();
+                    embeddingModel = provider.ModelName;
+                    embeddingDims = provider.Dimensions;
+                }
+                catch (Exception ex)
+                {
+                    embedNote = $"embedSelf=true failed: {ex.Message}";
+                }
+            }
+        }
 
         return _store.WithFreshState(memories =>
         {
@@ -101,6 +129,9 @@ public sealed class MemoryTools
                 Scope = scope,
                 Source = source,
                 Confidence = confidence,
+                Embedding = embedding,
+                EmbeddingModel = embeddingModel,
+                EmbeddingDimensions = embeddingDims,
             };
 
             memories.Add(record);
@@ -112,6 +143,10 @@ public sealed class MemoryTools
                 : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
             if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
             var msg = $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+            if (embedding is not null)
+                msg += $"\n   🔢 embedded ({embeddingModel}, dim={embeddingDims})";
+            if (embedNote is not null)
+                msg += $"\n   ⚠ {embedNote}";
             if (!_store.Backend.IsEnabled)
                 msg += "\n   ⚠ Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
             return msg;

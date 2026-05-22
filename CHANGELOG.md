@@ -194,6 +194,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `authenticate`, `authenticating`, `authenticated`, etc.
   Opt out with `KOSHI_BM25_STEMMING=off` if your corpus is heavy on
   exact-match codes / identifiers.
+- **Embedding provider plumbing — Phase 1 (#28).** Adds
+  `IEmbeddingProvider` interface and `EmbeddingProviderRegistry` in
+  `Koshi.Core.Retrieval` so optional adapter packages
+  (`Koshi.Embeddings.OpenAI`, `Koshi.Embeddings.Local`, etc.) can
+  register a provider at startup without bloating the AOT binary. The
+  default build ships no provider — BM25 keyword search remains the
+  sole retriever. `koshi_remember` now accepts an optional
+  `embedSelf: bool` parameter that populates the existing
+  `MemoryRecord.Embedding` field when a provider is configured (no-op
+  otherwise, with a one-line note in the response). `koshi_health`
+  reports the configured provider's model + dimensions.
 - **Stale CodeQL alerts cleared.** The 20 `useless-cast-to-self` alerts
   in generated `System.Text.Json.SourceGeneration` files were filed
   before `.github/codeql/codeql-config.yml` added `paths-ignore` for
