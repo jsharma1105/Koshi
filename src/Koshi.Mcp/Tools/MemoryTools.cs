@@ -515,7 +515,8 @@ public sealed class MemoryTools
             BackendKind: _store.Backend.BackendKind,
             UnmanagedNoteCount: _store.Backend.UnmanagedNoteCount,
             DuplicateIdWarningCount: _store.Backend.DuplicateIdWarningCount,
-            VaultWatcherStatus: _store.Backend is VaultBackend vb ? vb.WatcherStatus : null));
+            VaultWatcherStatus: _store.Backend is VaultBackend vb ? vb.WatcherStatus : null,
+            VaultFlavor: _store.Backend is VaultBackend vb2 ? vb2.Layout.FlavorName : null));
     }
 }
 
@@ -526,4 +527,5 @@ internal sealed record MemoryStatus(
     string BackendKind,
     int UnmanagedNoteCount,
     int DuplicateIdWarningCount,
-    string? VaultWatcherStatus);
+    string? VaultWatcherStatus,
+    string? VaultFlavor);

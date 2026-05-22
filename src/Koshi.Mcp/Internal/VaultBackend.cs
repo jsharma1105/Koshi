@@ -4,16 +4,19 @@ using Koshi.Core.Memory;
 namespace Koshi.Mcp.Internal;
 
 /// <summary>
-/// Vault-mode memory backend — one Markdown file per memory under
-/// <c>&lt;vault&gt;/koshi/{facts,decisions,patterns,preferences}/</c>.
-/// Activated by setting <c>KOSHI_MEMORY_VAULT</c>.
+/// Vault-mode memory backend — one Markdown file per memory under a vault directory.
+/// File layout (subdirs, filename scheme) is delegated to a flavor-specific
+/// <see cref="IVaultLayoutAdapter"/>; the wire format (YAML frontmatter under
+/// <c>---</c> fences) is identical across flavors.
+/// Activated by setting <c>KOSHI_MEMORY_VAULT</c>; layout selected via
+/// <c>KOSHI_VAULT_FLAVOR</c> (default: obsidian).
 /// </summary>
 /// <remarks>
 /// Identity is <see cref="MemoryRecord.Id"/>; the filename slug is cosmetic. On
 /// subject rename, the file is atomically moved to a new path with the same id.
 /// <para>
 /// External edits / git pulls / Obsidian writes are picked up via a
-/// <see cref="FileSystemWatcher"/> over <c>&lt;vault&gt;/koshi/**/*.md</c>; when an
+/// <see cref="FileSystemWatcher"/> scoped to the adapter's watch region; when an
 /// event is observed <see cref="ShouldReload"/> returns true once on the next call.
 /// When the watcher cannot attach (e.g. network mount), the backend falls back to
 /// "reload on every call" semantics. Disable via <c>KOSHI_VAULT_WATCH=off|false|0</c>.
@@ -22,6 +25,11 @@ namespace Koshi.Mcp.Internal;
 internal sealed class VaultBackend : IMemoryBackend, IDisposable
 {
     public string Root { get; }
+    public IVaultLayoutAdapter Layout { get; }
+
+    /// <summary>Legacy alias for the Obsidian "koshi/" subdir. For flavors with a
+    /// nested koshi/ tree this is its absolute path; for flat flavors this is the
+    /// directory the adapter watches/enumerates. Kept for tests / diagnostics only.</summary>
     public string KoshiDir { get; }
 
     public bool IsEnabled => true;
@@ -48,22 +56,27 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
     public IReadOnlyList<string> UnmanagedNotePaths => _unmanagedNotePaths;
     public int DuplicateIdWarningCount => _duplicateIdWarningCount;
 
-    public VaultBackend(string vaultRoot) : this(vaultRoot, watch: true) { }
+    public VaultBackend(string vaultRoot) : this(vaultRoot, watch: true, layout: null) { }
+    public VaultBackend(string vaultRoot, bool watch) : this(vaultRoot, watch, layout: null) { }
 
-    public VaultBackend(string vaultRoot, bool watch)
+    public VaultBackend(string vaultRoot, bool watch, IVaultLayoutAdapter? layout)
     {
         Root = Path.GetFullPath(vaultRoot);
-        KoshiDir = Path.Combine(Root, "koshi");
-        EnsureKoshiDirs();
+        Layout = layout ?? VaultLayout.ResolveFromEnv();
+        Layout.EnsureDirs(Root);
+
+        // Legacy: KoshiDir is the watch root for diagnostic purposes.
+        var watchSpec = Layout.WatcherSpec(Root);
+        KoshiDir = watchSpec?.watchDir ?? Path.Combine(Root, "koshi");
 
         _watchRequested = watch && WatcherEnvAllows();
-        if (_watchRequested)
+        if (_watchRequested && watchSpec is { } spec)
         {
             try
             {
-                _watcher = new FileSystemWatcher(KoshiDir, "*.md")
+                _watcher = new FileSystemWatcher(spec.watchDir, spec.filter)
                 {
-                    IncludeSubdirectories = true,
+                    IncludeSubdirectories = spec.recursive,
                     NotifyFilter = NotifyFilters.FileName
                                  | NotifyFilters.LastWrite
                                  | NotifyFilters.Size
@@ -80,8 +93,8 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             catch (Exception ex)
             {
                 Console.Error.WriteLine(
-                    $"[koshi] Vault watcher could not attach to '{KoshiDir}' ({ex.GetType().Name}: {ex.Message}); " +
-                    "falling back to reload-on-every-call.");
+                    $"[koshi] Vault watcher could not attach to '{spec.watchDir}' " +
+                    $"({ex.GetType().Name}: {ex.Message}); falling back to reload-on-every-call.");
                 _watcher?.Dispose();
                 _watcher = null;
                 _watcherAttached = false;
@@ -136,13 +149,6 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         catch { /* best effort on shutdown */ }
     }
 
-    private void EnsureKoshiDirs()
-    {
-        Directory.CreateDirectory(KoshiDir);
-        foreach (MemoryType t in Enum.GetValues<MemoryType>())
-            Directory.CreateDirectory(Path.Combine(KoshiDir, TypeSubdir(t)));
-    }
-
     public List<MemoryRecord> LoadAll()
     {
         var unmanagedAccum = new List<string>();
@@ -151,43 +157,40 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         var idToMtime = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         var idToRecord = new Dictionary<string, MemoryRecord>(StringComparer.Ordinal);
 
-        if (Directory.Exists(KoshiDir))
+        foreach (var path in Layout.EnumerateOwnedFiles(Root))
         {
-            foreach (var path in Directory.EnumerateFiles(KoshiDir, "*.md", SearchOption.AllDirectories))
+            if (Path.GetExtension(path) is not ".md") continue;
+            if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
+
+            var parsed = VaultDocument.Read(path);
+            if (parsed is null)
             {
-                if (Path.GetExtension(path) is not ".md") continue;
-                if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
+                unmanagedAccum.Add(path);
+                continue;
+            }
+            var mtime = File.GetLastWriteTimeUtc(path);
+            var id = parsed.Record.Id;
 
-                var parsed = VaultDocument.Read(path);
-                if (parsed is null)
-                {
-                    unmanagedAccum.Add(path);
-                    continue;
-                }
-                var mtime = File.GetLastWriteTimeUtc(path);
-                var id = parsed.Record.Id;
-
-                if (idToMtime.TryGetValue(id, out var existingMtime))
-                {
-                    dupAccum++;
-                    var existingPath = idToPath[id];
-                    Console.Error.WriteLine(
-                        $"[koshi] Duplicate memory id '{id}' in vault. Newest wins:\n" +
-                        $"  {existingPath} (mtime: {existingMtime:u})\n" +
-                        $"  {path} (mtime: {mtime:u})");
-                    if (mtime > existingMtime)
-                    {
-                        idToMtime[id] = mtime;
-                        idToPath[id] = path;
-                        idToRecord[id] = parsed.Record;
-                    }
-                }
-                else
+            if (idToMtime.TryGetValue(id, out var existingMtime))
+            {
+                dupAccum++;
+                var existingPath = idToPath[id];
+                Console.Error.WriteLine(
+                    $"[koshi] Duplicate memory id '{id}' in vault. Newest wins:\n" +
+                    $"  {existingPath} (mtime: {existingMtime:u})\n" +
+                    $"  {path} (mtime: {mtime:u})");
+                if (mtime > existingMtime)
                 {
                     idToMtime[id] = mtime;
                     idToPath[id] = path;
                     idToRecord[id] = parsed.Record;
                 }
+            }
+            else
+            {
+                idToMtime[id] = mtime;
+                idToPath[id] = path;
+                idToRecord[id] = parsed.Record;
             }
         }
 
@@ -200,7 +203,7 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
 
     public void Upsert(MemoryRecord record, IReadOnlyList<MemoryRecord> snapshot)
     {
-        EnsureKoshiDirs();
+        Layout.EnsureDirs(Root);
 
         var existingPath = LocateById(record.Id);
         string otherFrontmatter = "";
@@ -210,10 +213,7 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             if (parsed is not null) otherFrontmatter = parsed.OtherFrontmatterText;
         }
 
-        var targetPath = Path.Combine(
-            KoshiDir,
-            TypeSubdir(record.Type),
-            $"{Slug.Make(record.Subject)}--{record.Id}.md");
+        var targetPath = Layout.TargetPath(Root, record);
 
         try
         {
@@ -254,21 +254,18 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
 
     public void ReplaceAll(IReadOnlyList<MemoryRecord> records)
     {
-        EnsureKoshiDirs();
+        Layout.EnsureDirs(Root);
         // Delete only koshi-id-tagged files; leave unmanaged user notes alone.
-        if (Directory.Exists(KoshiDir))
+        foreach (var path in Layout.EnumerateOwnedFiles(Root).ToList())
         {
-            foreach (var path in Directory.EnumerateFiles(KoshiDir, "*.md", SearchOption.AllDirectories).ToList())
+            if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
+            var parsed = VaultDocument.Read(path);
+            if (parsed is not null)
             {
-                if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
-                var parsed = VaultDocument.Read(path);
-                if (parsed is not null)
+                try { File.Delete(path); }
+                catch (Exception ex)
                 {
-                    try { File.Delete(path); }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"[koshi] Could not delete '{path}' during ReplaceAll: {ex.Message}");
-                    }
+                    Console.Error.WriteLine($"[koshi] Could not delete '{path}' during ReplaceAll: {ex.Message}");
                 }
             }
         }
@@ -281,9 +278,8 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         if (_idToPath.TryGetValue(id, out var cached) && File.Exists(cached))
             return cached;
 
-        // Cache miss (or stale) — scan the tree once.
-        if (!Directory.Exists(KoshiDir)) return null;
-        foreach (var path in Directory.EnumerateFiles(KoshiDir, "*.md", SearchOption.AllDirectories))
+        // Cache miss (or stale) — scan the layout's owned files once.
+        foreach (var path in Layout.EnumerateOwnedFiles(Root))
         {
             if (path.EndsWith(".tmp", StringComparison.Ordinal)) continue;
             var parsed = VaultDocument.Read(path);
@@ -302,12 +298,7 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), comp);
     }
 
-    internal static string TypeSubdir(MemoryType type) => type switch
-    {
-        MemoryType.Fact => "facts",
-        MemoryType.Decision => "decisions",
-        MemoryType.Pattern => "patterns",
-        MemoryType.Preference => "preferences",
-        _ => "facts",
-    };
+    /// <summary>Legacy compatibility: returns the Obsidian-flavored type subdir.</summary>
+    internal static string TypeSubdir(MemoryType type) => ObsidianLayout.TypeSubdir(type);
 }
+
