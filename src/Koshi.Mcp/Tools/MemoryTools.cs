@@ -516,15 +516,23 @@ public sealed class MemoryTools
 
     internal static MemoryStatus GetStatus()
     {
-        return _store.WithFreshState(memories => new MemoryStatus(
-            Count: memories.Count,
-            PersistenceEnabled: _store.Backend.IsEnabled,
-            Path: _store.Backend.Location,
-            BackendKind: _store.Backend.BackendKind,
-            UnmanagedNoteCount: _store.Backend.UnmanagedNoteCount,
-            DuplicateIdWarningCount: _store.Backend.DuplicateIdWarningCount,
-            VaultWatcherStatus: _store.Backend is VaultBackend vb ? vb.WatcherStatus : null,
-            VaultFlavor: _store.Backend is VaultBackend vb2 ? vb2.Layout.FlavorName : null));
+        return _store.WithFreshState(memories =>
+        {
+            // Cache Backend once so a hypothetical future swap (lazy init,
+            // reconnect) can't make VaultWatcherStatus and VaultFlavor
+            // disagree about whether the backend is a vault.
+            var backend = _store.Backend;
+            var vault = backend as VaultBackend;
+            return new MemoryStatus(
+                Count: memories.Count,
+                PersistenceEnabled: backend.IsEnabled,
+                Path: backend.Location,
+                BackendKind: backend.BackendKind,
+                UnmanagedNoteCount: backend.UnmanagedNoteCount,
+                DuplicateIdWarningCount: backend.DuplicateIdWarningCount,
+                VaultWatcherStatus: vault?.WatcherStatus,
+                VaultFlavor: vault?.Layout.FlavorName);
+        });
     }
 }
 

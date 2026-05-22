@@ -3,6 +3,12 @@ using Koshi.Mcp.Internal;
 
 namespace Koshi.Core.Tests;
 
+// Serialize against other vault test classes — VaultBackendTests and
+// VaultWatcherTests also touch KOSHI_VAULT_FLAVOR. Without [Collection],
+// xUnit can run their constructors in parallel with ResolveFromEnv_reads_env_var
+// below, observing a "logseq" or "dendron" flavor instead of the nulled
+// state they expected.
+[Collection("VaultEnvVar")]
 public class VaultFlavorTests : IDisposable
 {
     private readonly string _vault;

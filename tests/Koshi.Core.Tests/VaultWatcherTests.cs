@@ -3,10 +3,14 @@ using Koshi.Mcp.Internal;
 
 namespace Koshi.Core.Tests;
 
+// Serialize against other vault test classes — see VaultBackendTests
+// header comment for the env-var race rationale.
+[Collection("VaultEnvVar")]
 public class VaultWatcherTests : IDisposable
 {
     private readonly string _vault;
     private readonly string? _origEnv;
+    private readonly string? _origFlavorEnv;
 
     public VaultWatcherTests()
     {
@@ -14,11 +18,18 @@ public class VaultWatcherTests : IDisposable
         Directory.CreateDirectory(_vault);
         _origEnv = Environment.GetEnvironmentVariable("KOSHI_VAULT_WATCH");
         Environment.SetEnvironmentVariable("KOSHI_VAULT_WATCH", null);
+        // PR #41: 2-arg VaultBackend ctor reads KOSHI_VAULT_FLAVOR. These
+        // tests hardcode obsidian paths ("koshi/facts/..."), so we must
+        // null out the env var or a developer with KOSHI_VAULT_FLAVOR set
+        // would see every watcher test fail.
+        _origFlavorEnv = Environment.GetEnvironmentVariable(VaultLayout.EnvVar);
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, null);
     }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("KOSHI_VAULT_WATCH", _origEnv);
+        Environment.SetEnvironmentVariable(VaultLayout.EnvVar, _origFlavorEnv);
         try { Directory.Delete(_vault, recursive: true); } catch { /* best-effort */ }
     }
 
