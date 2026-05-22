@@ -55,7 +55,9 @@ public sealed class MemoryTools
 
     [McpServerTool(Name = "koshi_remember"), Description(
         "Store a fact, decision, pattern, or preference in memory. " +
-        "Memories persist for the session, and across restarts when KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT is set. " +
+        "Memories persist across restarts by default (saved to <project-root>/.koshi/memory.json " +
+        "in v0.6.0+). Set KOSHI_MEMORY_FILE to override the path, or KOSHI_MEMORY_VAULT to switch " +
+        "to a Git-friendly Obsidian-style vault. " +
         "Scope (userId/workspaceId/threadId) controls who can recall the memory. " +
         "Leave userId unset (or pass '*') to make the memory globally visible.")]
     public static string Remember(
@@ -109,7 +111,10 @@ public sealed class MemoryTools
                 ? $"workspace='{scope.WorkspaceId}'"
                 : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
             if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
-            return $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+            var msg = $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+            if (!_store.Backend.IsEnabled)
+                msg += "\n   ⚠ Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
+            return msg;
         });
     }
 

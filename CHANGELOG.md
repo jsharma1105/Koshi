@@ -181,6 +181,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KOSHI_CHUNK_MAX_TOKENS` / `KOSHI_CHUNK_OVERLAP_TOKENS`. Out-of-range
   values are clamped with a warning rather than rejected, and the
   effective config is surfaced in the indexing response.
+- **Memory persistence is now discoverable (#30).** v0.6.0 already makes
+  persistence on by default at `<root>/.koshi/memory.json` (no env var
+  needed), and `koshi_memory_stats` already surfaces backend kind and
+  location at the top. This follow-up updates the `koshi_remember` tool
+  description to lead with the v0.6.0 default and adds a one-line stderr
+  nudge on Remember when persistence is genuinely disabled.
+- **Porter-style English stemmer for BM25 (#27).** `KeywordRetriever`
+  now stems both indexed terms and query terms with a built-in light
+  Porter-1980 implementation (`Koshi.Core.Tokenization.EnglishStemmer`).
+  Queries like `authentication` now match documents that say
+  `authenticate`, `authenticating`, `authenticated`, etc.
+  Opt out with `KOSHI_BM25_STEMMING=off` if your corpus is heavy on
+  exact-match codes / identifiers.
 - **Stale CodeQL alerts cleared.** The 20 `useless-cast-to-self` alerts
   in generated `System.Text.Json.SourceGeneration` files were filed
   before `.github/codeql/codeql-config.yml` added `paths-ignore` for
