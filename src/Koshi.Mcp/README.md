@@ -561,7 +561,7 @@ src/
 ├── Koshi.Mcp/         # ← This MCP server (publishes to NuGet)
 └── Koshi.Agents/      # Sub-agent persona installer (publishes to NuGet)
 tests/
-├── Koshi.Core.Tests/      # 351 xUnit tests
+├── Koshi.Core.Tests/      # 359 xUnit tests
 └── Koshi.Mcp.SmokeTest/   # End-to-end JSON-RPC smoke harness
 ```
 
