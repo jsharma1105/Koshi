@@ -287,9 +287,9 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 
 Koshi is configured exclusively through **environment variables** (no config files, no flags) — easy to set in any MCP client config.
 
-Since v0.6.0 every path env var **derives a sensible default from the project root**, so most users never need to set anything. If you launch `koshi-mcp` from `C:\OPP`, your memory and index land at `C:\OPP\.koshi\memory.json` and `C:\OPP\.koshi\index.json` automatically.
+Since v0.6.0 every path env var **derives a sensible default from the project root**, so most users never need to set anything. If you launch `koshi-mcp` from `~/myrepo` (or `C:\src\myrepo` on Windows), your memory and index land at `<project>/.koshi/memory.json` and `<project>/.koshi/index.json` automatically.
 
-> ⚠️ **Claude Desktop caveat:** Claude Desktop typically launches MCP servers with cwd=`%USERPROFILE%`, not your project. Set `KOSHI_PROJECT_ROOT` explicitly in your `claude_desktop_config.json` (e.g. `"KOSHI_PROJECT_ROOT": "C:/your/project"`). Copilot CLI and Cline launch servers with cwd=your project, so defaults Just Work there.
+> ⚠️ **Claude Desktop caveat:** Claude Desktop typically launches MCP servers with cwd=`%USERPROFILE%` / `$HOME`, not your project. Set `KOSHI_PROJECT_ROOT` explicitly in your `claude_desktop_config.json` (e.g. `"KOSHI_PROJECT_ROOT": "/Users/you/myrepo"` on macOS, `"/home/you/myrepo"` on Linux, or `"C:/Users/you/myrepo"` on Windows). Copilot CLI and Cline launch servers with cwd=your project, so defaults Just Work there.
 
 | Env var | Default | Purpose |
 |---------|---------|---------|

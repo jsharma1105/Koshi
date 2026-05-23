@@ -310,8 +310,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added — project-root path defaults (2026-05-22 amendment)
 - **`KOSHI_PROJECT_ROOT` env var.** All Koshi path env vars now derive
   sensible defaults from the project root. If you launch `koshi-mcp` from
-  `C:\OPP`, your memory and index land at `C:\OPP\.koshi\memory.json` and
-  `C:\OPP\.koshi\index.json` automatically — no configuration needed.
+  `~/myrepo`, your memory and index land at `~/myrepo/.koshi/memory.json` and
+  `~/myrepo/.koshi/index.json` automatically — no configuration needed.
 - **Defaults table** (each env var still wins when set):
 
   | Env var              | Unset default                       |
@@ -339,7 +339,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```json
   "koshi": {
     "command": "koshi-mcp",
-    "env": { "KOSHI_PROJECT_ROOT": "C:/your/project" }
+    "env": { "KOSHI_PROJECT_ROOT": "/Users/you/myrepo" }
   }
   ```
   Copilot CLI and Cline launch servers with cwd=your project, so the
