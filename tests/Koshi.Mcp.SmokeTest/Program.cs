@@ -1013,8 +1013,8 @@ finally
 // ─── Phase 7: Project-root defaults (no path env vars set) ──────────────
 // Validates the v0.6.0 amendment: when a third MCP process is launched with
 // cwd=<tmp> and NO KOSHI_* path env vars, memory + index land under
-// <tmp>/.koshi/ automatically. This is the "open Copilot in C:\OPP, run
-// Koshi, get C:\OPP\.koshi\memory.json" guarantee.
+// <tmp>/.koshi/ automatically. This is the "open Copilot in ~/myrepo, run
+// Koshi, get ~/myrepo/.koshi/memory.json" guarantee.
 string? defCwd = null;
 try
 {

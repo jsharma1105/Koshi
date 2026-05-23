@@ -87,8 +87,9 @@ chmod +x koshi-mcp
 
 Koshi writes its memory and index under `<project>/.koshi/` by default — the
 project root is whatever directory the MCP server was launched from. Open
-Copilot CLI in `C:\OPP`, install Koshi, and your data lives at
-`C:\OPP\.koshi\memory.json` automatically. No env vars required for the
+Copilot CLI in your project (say `~/myrepo` on macOS/Linux or
+`C:\src\myrepo` on Windows), install Koshi, and your data lives at
+`<project>/.koshi/memory.json` automatically. No env vars required for the
 common case.
 
 Override any path with the matching env var (see the [MCP server
