@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/koshi.svg)](https://pypi.org/project/koshi/)
 [![License](https://img.shields.io/pypi/l/koshi.svg)](https://github.com/jsharma1105/Koshi/blob/main/LICENSE)
 
-**Python client for the [Koshi MCP server](https://github.com/jsharma1105/Koshi).** Retrieval, memory, context engineering, and quality scoring for any LLM workflow — 20 tools, all wrapped as Pythonic methods.
+**Python client for the [Koshi MCP server](https://github.com/jsharma1105/Koshi).** Retrieval, memory, context engineering, and quality scoring for any LLM workflow — 24 tools, all wrapped as Pythonic methods.
 
 > No `.NET install` required. The first call auto-downloads a small native AOT binary (~15 MB) into your user cache.
 
@@ -40,12 +40,12 @@ The first `Client()` call:
 4. Spawns it as a subprocess, performs the MCP `initialize` handshake.
 5. Confirms the server's reported version matches the Python package version exactly. Mismatch raises `IncompatibleBinaryError`.
 
-## The 20 tools
+## The 24 tools
 
 | Group | Methods |
 |---|---|
 | **Retrieval** | `index_directory`, `index`, `search`, `list_indexed`, `clear_index` |
-| **Memory** | `remember`, `recall`, `forget`, `memory_stats`, `clear_memories` |
+| **Memory** | `remember`, `recall`, `forget`, `memory_stats`, `clear_memories`, `capture_turn`, `memory_export_to_vault`, `memory_import_from_vault`, `memory_sync_vault` |
 | **Context** | `compile_context`, `token_count`, `budget_plan` |
 | **Team / Quality** | `register_team`, `score_turn`, `team_dashboard`, `analyze_feedback`, `list_teams` |
 | **Diagnostics** | `version`, `health` |

@@ -17,18 +17,20 @@
 
 ## What Koshi is, in three sentences
 
-Koshi (講師, "instructor") is a **context-engineering toolkit for AI agents**, shipped as a Model Context Protocol (MCP) server. It bundles four pillars — **retrieval**, **memory**, **context-packing**, and **team telemetry** — into a single .NET 10 binary with **23 MCP tools** and **zero cloud dependencies**. Install it as a `dotnet tool`, point Claude Code or GitHub Copilot CLI at it, and stop re-implementing the same agent plumbing in every project.
+Koshi (講師, "instructor") is a **context-engineering toolkit for AI agents**, shipped as a Model Context Protocol (MCP) server. It bundles four pillars — **retrieval**, **memory**, **context-packing**, and **team telemetry** — into a single .NET 10 binary with **24 MCP tools** and **zero cloud dependencies**. Install it as a `dotnet tool`, point Claude Code or GitHub Copilot CLI at it, and stop re-implementing the same agent plumbing in every project.
 
 ## The four pillars
 
 | Pillar | Tools | What it solves |
 |---|---|---|
 | 🔎 **Retrieval** | `koshi_index`, `koshi_index_directory`, `koshi_search`, `koshi_list_indexed`, `koshi_clear_index` | BM25 over a persistent token-aware index. Index code/docs once, search forever. |
-| 🧠 **Memory** | `koshi_remember`, `koshi_recall`, `koshi_memory_stats`, `koshi_forget`, `koshi_clear_memories`, `koshi_memory_export_to_vault`, `koshi_memory_import_from_vault`, `koshi_memory_sync_vault` | Durable facts, decisions, patterns that survive across sessions — optionally as one Markdown file per memory in a Git-friendly **vault** ([docs](docs/vault-mode.md)). |
+| 🧠 **Memory** | `koshi_remember`, `koshi_recall`, `koshi_memory_stats`, `koshi_forget`, `koshi_clear_memories`, `koshi_capture_turn`, `koshi_memory_export_to_vault`, `koshi_memory_import_from_vault`, `koshi_memory_sync_vault` | Durable facts, decisions, patterns that survive across sessions — optionally as one Markdown file per memory in a Git-friendly **vault** ([docs](docs/vault-mode.md)). `koshi_capture_turn` lets the agent auto-extract decisions from a turn summary ([snippet](docs/copilot-instructions-snippet.md)). |
 | 📦 **Context** | `koshi_compile_context`, `koshi_token_count`, `koshi_budget_plan` | Token-budgeted prompt assembly. Give it a budget; it ranks, dedupes, trims. |
 | 📊 **Telemetry** | `koshi_register_team`, `koshi_score_turn`, `koshi_team_dashboard`, `koshi_analyze_feedback`, `koshi_list_teams` | Score agent turns. See where your team is bleeding tokens or accuracy. |
 
-Plus 2 diagnostics tools (`koshi_version`, `koshi_health`). **23 total.**
+Plus 2 diagnostics tools (`koshi_version`, `koshi_health`). **24 total.**
+
+The vault backend supports four file-layout flavors via `KOSHI_VAULT_FLAVOR=obsidian|foam|logseq|dendron` so your existing notes app keeps working unchanged.
 
 ## 60-second install
 
@@ -106,7 +108,7 @@ track Koshi state in Git — we'll never overwrite it.
 
 ## Why you'd use this instead of writing it yourself
 
-- **It's done.** 20 tools, 89 unit tests, .NET 10, MIT.
+- **It's done.** 24 tools, 351 unit tests, .NET 10, MIT. CodeQL clean (0 alerts).
 - **It's local.** No API keys, no cloud, no telemetry phoning home. Same wire format and on-disk format whether you reach it via `pip`, `dotnet tool`, or the raw AOT binary.
 - **It's friction-free.** `pip install koshi` works from a fresh Python 3.10 environment — no .NET install — and auto-fetches a native AOT binary verified against SHA-256 hashes baked into the wheel.
 - **It composes.** The sub-agent personas know which tools each persona is allowed to call — so your agents don't accidentally clobber memory while searching.
@@ -144,7 +146,7 @@ src/
 python/
 └── src/koshi/                      Python client (PyPI: koshi)
 tests/
-├── Koshi.Core.Tests/               89 xUnit unit tests
+├── Koshi.Core.Tests/               351 xUnit unit tests
 └── Koshi.Mcp.SmokeTest/            End-to-end JSON-RPC smoke harness
 scripts/
 └── inject-manifest.py              Release-time hash injector for the Python wheel
@@ -162,7 +164,7 @@ For Python-package development, see [`CONTRIBUTING.md`](CONTRIBUTING.md#python-p
 
 ## Documentation
 
-- [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 23 tools indexed.
+- [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 24 tools indexed.
 - [**MCP server reference**](src/Koshi.Mcp/README.md) — every tool, every argument, every client snippet.
 - [**Vault mode**](docs/vault-mode.md) — share memories across teams via a Git-backed Markdown vault (`KOSHI_MEMORY_VAULT`).
 - [**Sub-agent personas**](AGENTS.md) — librarian, memory-keeper, context-packer, quality-coach, orchestrator.

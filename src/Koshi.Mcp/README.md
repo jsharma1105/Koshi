@@ -25,7 +25,7 @@ persistent facts and decisions, and scores the quality of every AI interaction.
   - [GitHub Copilot CLI](#github-copilot-cli)
   - [Cursor / Windsurf](#cursor--windsurf)
   - [Generic MCP client](#generic-mcp-client)
-- [Available Tools (20)](#available-tools-20)
+- [Available Tools (24)](#available-tools-24)
 - [Configuration](#configuration)
 - [Usage Walkthroughs](#usage-walkthroughs)
 - [How It Works](#how-it-works)
@@ -230,7 +230,7 @@ Agency reads both `plugin.json` and `.claude-plugin/plugin.json` — Koshi ships
 
 ---
 
-## Available Tools (23)
+## Available Tools (24)
 
 ### 🔍 Retrieval (5)
 
@@ -561,7 +561,7 @@ src/
 ├── Koshi.Mcp/         # ← This MCP server (publishes to NuGet)
 └── Koshi.Agents/      # Sub-agent persona installer (publishes to NuGet)
 tests/
-├── Koshi.Core.Tests/      # 89 xUnit tests
+├── Koshi.Core.Tests/      # 351 xUnit tests
 └── Koshi.Mcp.SmokeTest/   # End-to-end JSON-RPC smoke harness
 ```
 

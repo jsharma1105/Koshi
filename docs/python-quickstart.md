@@ -45,9 +45,9 @@ The first run does three things:
 Output looks like:
 
 ```
-Koshi MCP Server v0.4.1
+Koshi MCP Server v0.8.0
 Status: healthy
-Tools: 20 registered
+Tools: 24 registered
 ```
 
 ---
@@ -154,7 +154,7 @@ timestamps the original `remember()` call wrote.
 from koshi import Client
 
 with Client() as koshi:
-    print(koshi.version())   # Koshi MCP Server v0.4.1
+    print(koshi.version())   # Koshi MCP Server v0.8.0
     print(koshi.health())    # corpus size, memory store, persistence, uptime, GC
 ```
 
@@ -163,18 +163,18 @@ configured, it shows the path. If the index is hot, it shows the chunk count.
 
 ---
 
-## All 20 tools
+## All 24 tools
 
 | Group | Methods |
 |---|---|
 | **Retrieval** | `index_directory`, `index`, `search`, `list_indexed`, `clear_index` |
-| **Memory** | `remember`, `recall`, `forget`, `memory_stats`, `clear_memories` |
+| **Memory** | `remember`, `recall`, `forget`, `memory_stats`, `clear_memories`, `capture_turn`, `memory_export_to_vault`, `memory_import_from_vault`, `memory_sync_vault` |
 | **Context** | `compile_context`, `token_count`, `budget_plan` |
 | **Team / Quality** | `register_team`, `score_turn`, `team_dashboard`, `analyze_feedback`, `list_teams` |
 | **Diagnostics** | `version`, `health` |
 
 Full Python API: [`python/README.md`](../python/README.md).
-Full tool reference (every argument, every shape): [`src/Koshi.Mcp/README.md`](../src/Koshi.Mcp/README.md#available-tools-20).
+Full tool reference (every argument, every shape): [`src/Koshi.Mcp/README.md`](../src/Koshi.Mcp/README.md#available-tools-24).
 
 ---
 
@@ -183,9 +183,11 @@ Full tool reference (every argument, every shape): [`src/Koshi.Mcp/README.md`](.
 | Var | Effect |
 |---|---|
 | `KOSHI_BIN` | Path to a `koshi-mcp` binary. Skips auto-download, overrides PATH lookup. Version still verified at spawn time. |
-| `KOSHI_MEMORY_FILE` | Persist memories to this JSON file across server restarts. Default: in-memory only. |
+| `KOSHI_MEMORY_FILE` | Persist memories to this JSON file across server restarts. Default: `<project>/.koshi/memory.json` (since v0.6.0). |
+| `KOSHI_MEMORY_VAULT` | Persist memories as one Markdown file per memory under a Git-friendly vault directory. Pairs with `KOSHI_VAULT_FLAVOR` (since v0.7.0). See [`docs/vault-mode.md`](./vault-mode.md). |
+| `KOSHI_VAULT_FLAVOR` | `obsidian` (default) / `foam` / `logseq` / `dendron`. Selects vault file layout. Wire format is identical across flavors. |
 | `KOSHI_INDEX_PATH` | Default directory the server auto-indexes on first `search` if you don't pass one explicitly. |
-| `KOSHI_INDEX_FILE` | Persist the BM25 retrieval index to this JSON file across server restarts. On startup the snapshot auto-loads; if the source directory has drifted (file fingerprint mismatch) it's discarded and a fresh re-index runs. Default: in-memory only — every restart re-chunks from scratch. |
+| `KOSHI_INDEX_FILE` | Persist the BM25 retrieval index to this JSON file across server restarts. On startup the snapshot auto-loads; if the source directory has drifted (file fingerprint mismatch) it's discarded and a fresh re-index runs. Default: `<project>/.koshi/index.json`. |
 
 ---
 
@@ -241,13 +243,13 @@ and the same indexed corpus.
 # On a machine with internet:
 pip download --no-deps koshi -d ./offline-koshi
 curl -L -o koshi-mcp \
-  https://github.com/jsharma1105/Koshi/releases/download/v0.4.1/koshi-mcp-linux-x64
+  https://github.com/jsharma1105/Koshi/releases/download/v0.8.0/koshi-mcp-linux-x64
 curl -L -o koshi-mcp.sha256 \
-  https://github.com/jsharma1105/Koshi/releases/download/v0.4.1/koshi-mcp-linux-x64.sha256
+  https://github.com/jsharma1105/Koshi/releases/download/v0.8.0/koshi-mcp-linux-x64.sha256
 sha256sum -c <(awk '{print $1"  koshi-mcp"}' koshi-mcp.sha256)
 
 # Move the wheel and binary to the air-gapped machine, then:
-pip install ./offline-koshi/koshi-0.4.1-py3-none-any.whl
+pip install ./offline-koshi/koshi-0.8.0-py3-none-any.whl
 chmod +x ./koshi-mcp
 export KOSHI_BIN=./koshi-mcp
 python -c "from koshi import Client; \
@@ -262,4 +264,4 @@ The Python package version and the binary version **must** match exactly.
 
 - [Read the comparison table](../src/Koshi.Mcp/README.md#why-koshi) to see how Koshi stacks up against MCP Memory, AWS KB Retrieval, and RAG SaaS.
 - [Set up sub-agent personas](../AGENTS.md) if you also use Claude Code or GitHub Copilot CLI.
-- [File an issue](https://github.com/jsharma1105/Koshi/issues) — feedback shapes v0.5.0.
+- [File an issue](https://github.com/jsharma1105/Koshi/issues) — feedback shapes the next release.

@@ -377,9 +377,11 @@ one for archival.
 
 | Version | What changes |
 |---|---|
-| **0.6.0** (current) | Vault backend, three sync tools, unmanaged-note reporting, per-call disk reload. |
-| 0.6.1 | `FileSystemWatcher`-backed cache invalidation — skip the per-call scan when the cache is known fresh. |
-| 0.7.0 | Multi-flavor file layouts: Logseq (`pages/*.md`), Dendron (`koshi.<type>.<slug>.md`). The frontmatter schema is unchanged across flavors. |
+| 0.6.0 | Vault backend, three sync tools, unmanaged-note reporting, per-call disk reload. |
+| 0.6.1 | `FileSystemWatcher`-backed cache invalidation — skips the per-call scan when the cache is known fresh. |
+| 0.7.0 | Multi-flavor file layouts via `KOSHI_VAULT_FLAVOR`: Obsidian (default), Foam, Logseq (`<vault>/pages/koshi-<type>-<slug>.md`), Dendron (`<vault>/koshi.<type>.<slug>.md`). The frontmatter schema is unchanged across flavors. |
+| **0.8.0** (current) | `koshi_capture_turn` — turn-end auto-capture of decision-shape sentences from agent summaries. Persists each as a `Decision` memory with optional `linked_pr` / `linked_commits` provenance. Pair with [`docs/copilot-instructions-snippet.md`](./copilot-instructions-snippet.md). |
+| Coming | Durable-write contract (issue [#48](https://github.com/jsharma1105/Koshi/issues/48)) — backends will throw `MemoryPersistenceException` instead of swallowing IO failures, so tools report ❌ on persistence failure with cache rolled back. |
 
 ---
 

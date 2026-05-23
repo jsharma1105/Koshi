@@ -1,6 +1,6 @@
 # Koshi Sub-Agent Personas
 
-Five focused personas that wrap the **Koshi MCP server**'s 20 tools into role-specific agents you can invoke from MCP-compatible clients (GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Agency, …).
+Five focused personas that wrap the **Koshi MCP server**'s 24 tools into role-specific agents you can invoke from MCP-compatible clients (GitHub Copilot CLI, Claude Code, Cursor, Windsurf, Agency, …).
 
 The same five personas ship in two formats:
 
@@ -14,10 +14,10 @@ The same five personas ship in two formats:
 | Persona | Pillar | Tools | When to use |
 |---------|--------|-------|-------------|
 | `koshi-librarian` | Retrieval | 5 + diagnostics | Index code/docs and search them. |
-| `koshi-memory-keeper` | Memory | 5 + diagnostics | Store / recall facts, decisions, patterns, preferences. |
+| `koshi-memory-keeper` | Memory | 9 + diagnostics | Store / recall facts, decisions, patterns, preferences; vault export/import/sync; turn-end auto-capture. |
 | `koshi-context-packer` | Context | 3 + read-only retrieval/recall | Plan token budgets and pack prompt windows for cache reuse. |
 | `koshi-quality-coach` | Quality | 5 + diagnostics | Score AI interactions per team, surface trends, recommend tuning. |
-| `koshi-orchestrator` | All | All 20 | Generalist that routes cross-pillar requests. |
+| `koshi-orchestrator` | All | All 24 | Generalist that routes cross-pillar requests. |
 
 Each persona enforces single-responsibility boundaries — for example, `koshi-librarian` will refuse to call memory or team tools and will hand off to the right persona instead.
 
@@ -44,7 +44,7 @@ with Client() as koshi:
 ```
 
 The personas below are *informational* in Python — they describe how to scope
-the 20 tools into role-specific prompts when you wire Koshi into Claude Code /
+the 24 tools into role-specific prompts when you wire Koshi into Claude Code /
 Copilot CLI from a Python-only host. The agent-installer below is .NET-only.
 
 ### .NET tool (`dotnet tool install`)
@@ -125,25 +125,25 @@ The personas are plain Markdown system prompts. Copy the body of the relevant `.
 
 ---
 
-## How the personas relate to the 20 MCP tools
+## How the personas relate to the 24 MCP tools
 
 ```
-┌──────────────────────────── Koshi MCP (20 tools) ─────────────────────────────┐
+┌──────────────────────────── Koshi MCP (24 tools) ─────────────────────────────┐
 │                                                                                │
-│  Retrieval (5)        Memory (5)         Context (3)        Team/Qual (5)      │
+│  Retrieval (5)        Memory (9)         Context (3)        Team/Qual (5)      │
 │  ──────────────      ─────────────      ─────────────      ──────────────      │
-│  index_directory ◄───┐                                                          │
-│  index           ◄───┤  remember  ◄───┐  compile  ◄───┐                         │
-│  search          ◄───┤  recall    ◄───┤  budget   ◄───┤                         │
-│  list_indexed    ◄───┤  stats     ◄───┤  tokens   ◄───┤                         │
-│  clear_index     ◄───┤  forget    ◄───┤              ◄┤                         │
-│                  ◄───┤  clear_mem ◄───┘              ◄┤  register_team  ◄───┐   │
-│                      │                               ◄│  score_turn     ◄───┤   │
-│                      │                                │  dashboard      ◄───┤   │
-│                      │                                │  analyze        ◄───┤   │
-│         + diagnostics: health, version                │  list_teams     ◄───┘   │
-│                      │                                │                         │
-│                      ▼                                ▼                         │
+│  index_directory ◄───┐  remember              compile  ◄───┐                    │
+│  index           ◄───┤  recall                budget   ◄───┤                    │
+│  search          ◄───┤  memory_stats          tokens   ◄───┤                    │
+│  list_indexed    ◄───┤  forget                              │  register_team    │
+│  clear_index     ◄───┤  clear_memories                      │  score_turn       │
+│                      │  capture_turn (v0.8.0) ◄────────────┤  dashboard        │
+│                      │  memory_export_to_vault              │  analyze          │
+│                      │  memory_import_from_vault            │  list_teams       │
+│                      │  memory_sync_vault                   │                   │
+│         + diagnostics (2): health, version                  │                   │
+│                      │                                ▼                         │
+│                      ▼                                                          │
 │   koshi-librarian    koshi-memory-keeper   koshi-context-packer  koshi-quality-coach │
 │                                                                                 │
 │                ┌────────────── koshi-orchestrator ──────────────┐                │

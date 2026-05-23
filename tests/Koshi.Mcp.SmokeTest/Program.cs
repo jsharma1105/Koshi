@@ -416,7 +416,7 @@ var initResp = await RpcAsync("initialize", new
 if (initResp is null) { Console.Error.WriteLine("FAIL: no response to initialize"); KillAndExit(2); }
 await SendNotificationAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
 
-// ─── Phase 2: tools/list — must enumerate all 23 tools ───────────────────
+// ─── Phase 2: tools/list — must enumerate all 24 tools ───────────────────
 var listResp = await RpcAsync("tools/list");
 if (listResp is null) { failures.Add("tools/list: TIMEOUT"); }
 else
@@ -640,7 +640,7 @@ if (preSeededIndexFile is not null)
     }
 }
 
-// ─── Phase 4: each of the 23 tools ──────────────────────────────────────
+// ─── Phase 4: each of the 24 tools ──────────────────────────────────────
 // Retrieval (5)
 await ExpectSuccessAsync("koshi_index", "koshi_index", new
 {
