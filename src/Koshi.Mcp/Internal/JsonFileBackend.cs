@@ -92,9 +92,13 @@ internal sealed class JsonFileBackend : IMemoryBackend
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or SecurityException
-                or JsonException or NotSupportedException or PathTooLongException)
+                or JsonException or NotSupportedException or PathTooLongException
+                or ArgumentException or DirectoryNotFoundException)
         {
             Console.Error.WriteLine($"[koshi] Failed to save memory file '{Path}': {ex.Message}");
+            throw new MemoryPersistenceException(
+                BackendKind, Path,
+                $"Failed to save memory file '{Path}': {ex.Message}", ex);
         }
     }
 }

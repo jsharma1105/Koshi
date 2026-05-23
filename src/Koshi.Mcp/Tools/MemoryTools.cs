@@ -118,42 +118,49 @@ public sealed class MemoryTools
             }
         }
 
-        return _store.WithFreshState(memories =>
+        try
         {
-            if (memories.Count >= MaxMemories)
-                return $"❌ Memory limit reached ({MaxMemories}). Use koshi_forget to free space.";
-
-            var record = new MemoryRecord
+            return _store.WithFreshState(memories =>
             {
-                Id = _store.AllocateId(),
-                Type = memType,
-                Content = content,
-                Subject = subject,
-                Scope = scope,
-                Source = source,
-                Confidence = confidence,
-                Embedding = embedding,
-                EmbeddingModel = embeddingModel,
-                EmbeddingDimensions = embeddingDims,
-            };
+                if (memories.Count >= MaxMemories)
+                    return $"❌ Memory limit reached ({MaxMemories}). Use koshi_forget to free space.";
 
-            memories.Add(record);
-            _store.Upsert(record);
+                var record = new MemoryRecord
+                {
+                    Id = _store.AllocateId(),
+                    Type = memType,
+                    Content = content,
+                    Subject = subject,
+                    Scope = scope,
+                    Source = source,
+                    Confidence = confidence,
+                    Embedding = embedding,
+                    EmbeddingModel = embeddingModel,
+                    EmbeddingDimensions = embeddingDims,
+                };
 
-            var preview = content.Length > 80 ? content[..80] + "..." : content;
-            var scopeLabel = scope.UserId == "*"
-                ? $"workspace='{scope.WorkspaceId}'"
-                : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
-            if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
-            var msg = $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
-            if (embedding is not null)
-                msg += $"\n   🔢 embedded ({embeddingModel}, dim={embeddingDims})";
-            if (embedNote is not null)
-                msg += $"\n   ⚠ {embedNote}";
-            if (!_store.Backend.IsEnabled)
-                msg += "\n   ⚠ Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
-            return msg;
-        });
+                memories.Add(record);
+                _store.Upsert(record);
+
+                var preview = content.Length > 80 ? content[..80] + "..." : content;
+                var scopeLabel = scope.UserId == "*"
+                    ? $"workspace='{scope.WorkspaceId}'"
+                    : $"user='{scope.UserId}', workspace='{scope.WorkspaceId}'";
+                if (scope.ThreadId is not null) scopeLabel += $", thread='{scope.ThreadId}'";
+                var msg = $"✅ Remembered [{memType}] about '{subject}' ({scopeLabel}): \"{preview}\" (confidence: {confidence:P0})";
+                if (embedding is not null)
+                    msg += $"\n   🔢 embedded ({embeddingModel}, dim={embeddingDims})";
+                if (embedNote is not null)
+                    msg += $"\n   ⚠ {embedNote}";
+                if (!_store.Backend.IsEnabled)
+                    msg += "\n   ⚠ Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
+                return msg;
+            });
+        }
+        catch (MemoryPersistenceException ex)
+        {
+            return FormatPersistenceFailure("koshi_remember", ex);
+        }
     }
 
     [McpServerTool(Name = "koshi_recall"), Description(
@@ -364,19 +371,26 @@ public sealed class MemoryTools
         if (string.IsNullOrWhiteSpace(subject))
             return "❌ Subject must not be empty.";
 
-        return _store.WithFreshState(memories =>
+        try
         {
-            var toRemove = memories
-                .Where(m => m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (toRemove.Count == 0)
-                return $"No memories found with subject '{subject}'.";
+            return _store.WithFreshState(memories =>
+            {
+                var toRemove = memories
+                    .Where(m => m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (toRemove.Count == 0)
+                    return $"No memories found with subject '{subject}'.";
 
-            foreach (var rec in toRemove) memories.Remove(rec);
-            foreach (var rec in toRemove) _store.Delete(rec.Id);
+                foreach (var rec in toRemove) memories.Remove(rec);
+                foreach (var rec in toRemove) _store.Delete(rec.Id);
 
-            return $"✅ Forgot {toRemove.Count} memory(ies) about '{subject}'.";
-        });
+                return $"✅ Forgot {toRemove.Count} memory(ies) about '{subject}'.";
+            });
+        }
+        catch (MemoryPersistenceException ex)
+        {
+            return FormatPersistenceFailure("koshi_forget", ex);
+        }
     }
 
     [McpServerTool(Name = "koshi_clear_memories"), Description(
@@ -388,14 +402,21 @@ public sealed class MemoryTools
         if (!confirm)
             return "⚠️ This will delete ALL memories. Re-call with confirm=true to proceed.";
 
-        return _store.WithFreshState(memories =>
+        try
         {
-            int removed = memories.Count;
-            _store.ReplaceAll([]);
-            return removed == 0
-                ? "Memory store already empty."
-                : $"✅ Cleared {removed} memory(ies).";
-        });
+            return _store.WithFreshState(memories =>
+            {
+                int removed = memories.Count;
+                _store.ReplaceAll([]);
+                return removed == 0
+                    ? "Memory store already empty."
+                    : $"✅ Cleared {removed} memory(ies).";
+            });
+        }
+        catch (MemoryPersistenceException ex)
+        {
+            return FormatPersistenceFailure("koshi_clear_memories", ex);
+        }
     }
 
     [McpServerTool(Name = "koshi_memory_export_to_vault"), Description(
@@ -430,8 +451,17 @@ public sealed class MemoryTools
                        "Pass overwrite=true to replace them.";
 
             var snapshot = _store.WithFreshState(memories => memories.ToList());
-            target.ReplaceAll(snapshot);
-            return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
+            try
+            {
+                target.ReplaceAll(snapshot);
+                return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
+            }
+            catch (MemoryPersistenceException ex)
+            {
+                return "❌ koshi_memory_export_to_vault: persistence failed writing to " +
+                       $"target vault '{ex.Location}': {ex.InnerException?.Message ?? ex.Message}. " +
+                       "Target vault may be in a partially-written state; source cache is untouched.";
+            }
         }
     }
 
@@ -469,42 +499,51 @@ public sealed class MemoryTools
             if (incoming.Count == 0)
                 return $"No managed memories found at '{source.Location}'.";
 
-            return _store.WithFreshState(memories =>
+            try
             {
-                if (modeNorm == "replace")
+                return _store.WithFreshState(memories =>
                 {
-                    int prior = memories.Count;
-                    _store.ReplaceAll(incoming);
-                    return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
-                }
-
-                int added = 0, replaced = 0, kept = 0;
-                var byId = memories.ToDictionary(m => m.Id, StringComparer.Ordinal);
-                foreach (var inc in incoming)
-                {
-                    if (byId.ContainsKey(inc.Id))
+                    if (modeNorm == "replace")
                     {
-                        if (modeNorm == "overlay")
+                        int prior = memories.Count;
+                        _store.ReplaceAll(incoming);
+                        return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
+                    }
+
+                    int added = 0, replaced = 0, kept = 0;
+                    var byId = memories.ToDictionary(m => m.Id, StringComparer.Ordinal);
+                    foreach (var inc in incoming)
+                    {
+                        if (byId.ContainsKey(inc.Id))
                         {
-                            int idx = memories.FindIndex(m => m.Id == inc.Id);
-                            memories[idx] = inc;
-                            _store.Upsert(inc);
-                            replaced++;
+                            if (modeNorm == "overlay")
+                            {
+                                int idx = memories.FindIndex(m => m.Id == inc.Id);
+                                memories[idx] = inc;
+                                _store.Upsert(inc);
+                                replaced++;
+                            }
+                            else
+                            {
+                                kept++;
+                            }
                         }
                         else
                         {
-                            kept++;
+                            memories.Add(inc);
+                            _store.Upsert(inc);
+                            added++;
                         }
                     }
-                    else
-                    {
-                        memories.Add(inc);
-                        _store.Upsert(inc);
-                        added++;
-                    }
-                }
-                return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
-            });
+                    return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
+                });
+            }
+            catch (MemoryPersistenceException ex)
+            {
+                return FormatPersistenceFailure("koshi_memory_import_from_vault", ex,
+                    extra: "Import was partial; the in-memory cache has been reloaded from disk " +
+                           "to mirror durable state. Some incoming records may still be applied.");
+            }
         }
     }
 
@@ -593,72 +632,91 @@ public sealed class MemoryTools
             return preview.ToString();
         }
 
-        return _store.WithFreshState(memories =>
+        try
         {
-            var saved = new List<(string Id, string Subject)>();
-            var skipped = new List<(string Subject, string Reason)>();
-
-            foreach (var cand in candidates)
+            return _store.WithFreshState(memories =>
             {
-                if (memories.Count >= MaxMemories)
+                var saved = new List<(string Id, string Subject)>();
+                var skipped = new List<(string Subject, string Reason)>();
+
+                foreach (var cand in candidates)
                 {
-                    skipped.Add((cand.Subject, "memory limit reached"));
-                    break;
+                    if (memories.Count >= MaxMemories)
+                    {
+                        skipped.Add((cand.Subject, "memory limit reached"));
+                        break;
+                    }
+
+                    // Dedupe key includes the full scope (UserId, WorkspaceId,
+                    // ThreadId) so one user's capture never suppresses another
+                    // user's identical-subject capture in the same workspace,
+                    // and a thread-scoped capture is distinct from the same
+                    // subject captured at the workspace level. Type and Subject
+                    // are matched case-insensitively (Subject is normalized
+                    // upstream by DecisionExtractor.DeriveSubject).
+                    var dupe = memories.FirstOrDefault(m =>
+                        m.Type == MemoryType.Decision &&
+                        string.Equals(m.Subject, cand.Subject, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(m.Scope.UserId, scope.UserId, StringComparison.Ordinal) &&
+                        string.Equals(m.Scope.WorkspaceId, scope.WorkspaceId, StringComparison.Ordinal) &&
+                        string.Equals(m.Scope.ThreadId, scope.ThreadId, StringComparison.Ordinal));
+                    if (dupe is not null)
+                    {
+                        skipped.Add((cand.Subject, $"duplicate of {dupe.Id}"));
+                        continue;
+                    }
+
+                    var body = provenance is null
+                        ? cand.Body
+                        : $"{cand.Body}\n\n---\n{provenance}";
+
+                    var record = new MemoryRecord
+                    {
+                        Id = _store.AllocateId(),
+                        Type = MemoryType.Decision,
+                        Content = body,
+                        Subject = cand.Subject,
+                        Scope = scope,
+                        Source = "koshi_capture_turn",
+                        Confidence = cand.Confidence,
+                    };
+
+                    memories.Add(record);
+                    _store.Upsert(record);
+                    saved.Add((record.Id, cand.Subject));
                 }
 
-                // Dedupe key includes the full scope (UserId, WorkspaceId,
-                // ThreadId) so one user's capture never suppresses another
-                // user's identical-subject capture in the same workspace,
-                // and a thread-scoped capture is distinct from the same
-                // subject captured at the workspace level. Type and Subject
-                // are matched case-insensitively (Subject is normalized
-                // upstream by DecisionExtractor.DeriveSubject).
-                var dupe = memories.FirstOrDefault(m =>
-                    m.Type == MemoryType.Decision &&
-                    string.Equals(m.Subject, cand.Subject, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(m.Scope.UserId, scope.UserId, StringComparison.Ordinal) &&
-                    string.Equals(m.Scope.WorkspaceId, scope.WorkspaceId, StringComparison.Ordinal) &&
-                    string.Equals(m.Scope.ThreadId, scope.ThreadId, StringComparison.Ordinal));
-                if (dupe is not null)
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"✅ Captured {saved.Count} decision(s) from turn summary.");
+                foreach (var (id, subject) in saved)
+                    sb.AppendLine($"   • {id}: {subject}");
+                if (skipped.Count > 0)
                 {
-                    skipped.Add((cand.Subject, $"duplicate of {dupe.Id}"));
-                    continue;
+                    sb.AppendLine($"\n⏭ Skipped {skipped.Count}:");
+                    foreach (var (subject, reason) in skipped)
+                        sb.AppendLine($"   • {subject} — {reason}");
                 }
+                if (!_store.Backend.IsEnabled)
+                    sb.AppendLine("\n⚠ Persistence is disabled — captures are in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist.");
+                return sb.ToString();
+            });
+        }
+        catch (MemoryPersistenceException ex)
+        {
+            return FormatPersistenceFailure("koshi_capture_turn", ex,
+                extra: "Capture was partial; the in-memory cache has been reloaded from disk. " +
+                       "Some earlier candidates in the same call may already be durably saved.");
+        }
+    }
 
-                var body = provenance is null
-                    ? cand.Body
-                    : $"{cand.Body}\n\n---\n{provenance}";
-
-                var record = new MemoryRecord
-                {
-                    Id = _store.AllocateId(),
-                    Type = MemoryType.Decision,
-                    Content = body,
-                    Subject = cand.Subject,
-                    Scope = scope,
-                    Source = "koshi_capture_turn",
-                    Confidence = cand.Confidence,
-                };
-
-                memories.Add(record);
-                _store.Upsert(record);
-                saved.Add((record.Id, cand.Subject));
-            }
-
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"✅ Captured {saved.Count} decision(s) from turn summary.");
-            foreach (var (id, subject) in saved)
-                sb.AppendLine($"   • {id}: {subject}");
-            if (skipped.Count > 0)
-            {
-                sb.AppendLine($"\n⏭ Skipped {skipped.Count}:");
-                foreach (var (subject, reason) in skipped)
-                    sb.AppendLine($"   • {subject} — {reason}");
-            }
-            if (!_store.Backend.IsEnabled)
-                sb.AppendLine("\n⚠ Persistence is disabled — captures are in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist.");
-            return sb.ToString();
-        });
+    private static string FormatPersistenceFailure(string toolName, MemoryPersistenceException ex, string? extra = null)
+    {
+        var location = string.IsNullOrEmpty(ex.Location) ? "(unset)" : ex.Location;
+        var inner = ex.InnerException?.Message ?? ex.Message;
+        var msg = $"❌ {toolName}: persistence failed on {ex.BackendKind} backend at '{location}': {inner}. " +
+                  "Cache has been reloaded from disk to mirror the actual durable state.";
+        if (extra is not null) msg += " " + extra;
+        return msg;
     }
 
     private static string? BuildProvenance(int linkedPr, string? linkedCommits)

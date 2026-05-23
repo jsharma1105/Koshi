@@ -232,12 +232,18 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or SecurityException
-                or PathTooLongException or DirectoryNotFoundException)
+                or PathTooLongException or DirectoryNotFoundException
+                or ArgumentException or NotSupportedException)
         {
             Console.Error.WriteLine($"[koshi] Failed to write '{targetPath}': {ex.Message}");
-            return;
+            throw new MemoryPersistenceException(
+                BackendKind, Root,
+                $"Failed to write memory file '{targetPath}': {ex.Message}", ex);
         }
 
+        // Best-effort orphan cleanup AFTER the new file is durable. A failure here leaves
+        // an extra file on disk (eventually GC'd by ReplaceAll) but the new file is already
+        // written, so this is intentionally not part of the durable-write contract.
         if (existingPath is not null
             && !PathsEqual(existingPath, targetPath))
         {
@@ -260,9 +266,14 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             _idToPath.Remove(id);
         }
         catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or SecurityException)
+            ex is IOException or UnauthorizedAccessException or SecurityException
+                or PathTooLongException or DirectoryNotFoundException
+                or ArgumentException or NotSupportedException)
         {
             Console.Error.WriteLine($"[koshi] Could not delete memory file '{path}': {ex.Message}");
+            throw new MemoryPersistenceException(
+                BackendKind, Root,
+                $"Failed to delete memory file '{path}': {ex.Message}", ex);
         }
     }
 
@@ -270,6 +281,9 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
     {
         Layout.EnsureDirs(Root);
         // Delete only koshi-id-tagged files; leave unmanaged user notes alone.
+        // A delete failure on an owned file IS part of the durable-write contract — if we
+        // can't clear an owned record, ReplaceAll has not actually replaced state. Throw so
+        // the caller knows the operation was partial.
         foreach (var path in Layout.EnumerateOwnedFiles(Root)
             .Where(p => !p.EndsWith(".tmp", StringComparison.Ordinal))
             .ToList())
@@ -279,9 +293,14 @@ internal sealed class VaultBackend : IMemoryBackend, IDisposable
             {
                 try { File.Delete(path); }
                 catch (Exception ex) when (
-                    ex is IOException or UnauthorizedAccessException or SecurityException)
+                    ex is IOException or UnauthorizedAccessException or SecurityException
+                        or PathTooLongException or DirectoryNotFoundException
+                        or ArgumentException or NotSupportedException)
                 {
                     Console.Error.WriteLine($"[koshi] Could not delete '{path}' during ReplaceAll: {ex.Message}");
+                    throw new MemoryPersistenceException(
+                        BackendKind, Root,
+                        $"ReplaceAll failed while deleting owned file '{path}': {ex.Message}", ex);
                 }
             }
         }
