@@ -77,6 +77,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   said "all below confidence floor 0.50" even when the count was zero.
   (Surfaced by opus-deep-review.)
 
+### Fixed (durable-write contract — closes #48)
+- **Backend writes now signal failure instead of silently swallowing
+  IO errors.** Previously a disk-full / read-only-file / vault-not-
+  writable condition could cause `koshi_remember`, `koshi_forget`,
+  `koshi_clear_memories`, `koshi_memory_export_to_vault`,
+  `koshi_memory_import_from_vault`, and `koshi_capture_turn` to return
+  `✅ Remembered as mem-NNNNNN` while the durable copy never made it
+  to disk — and worse, a later process restart would lose every
+  in-session memory because the cache was the only copy. Now:
+  - `JsonFileBackend.Save`, `VaultBackend.Upsert`, `VaultBackend.Delete`,
+    and the owned-file deletes inside `VaultBackend.ReplaceAll` log to
+    stderr and throw a typed `MemoryPersistenceException` carrying
+    backend kind (`json` / `vault`), durable location (file path /
+    vault root), and the underlying IO exception.
+  - Catch filters widened to include `ArgumentException`,
+    `NotSupportedException`, and `DirectoryNotFoundException` so
+    path-related failures (invalid chars, reserved Windows names,
+    vault dir deleted concurrently) also surface through the typed
+    exception instead of leaking raw IO exceptions to MCP clients.
+  - `MemoryStore.WithFreshState` and `MemoryStore.ReplaceAll` catch
+    `MemoryPersistenceException`, reload the in-memory cache from
+    disk so it mirrors the actual durable state (no more cache
+    ahead of disk after a partial multi-step mutation), and rethrow.
+    Secondary failures during reload are logged but do not mask the
+    original exception.
+  - Every mutation tool now returns a clear `❌ persistence failed on
+    {backend} backend at '{location}': {reason}. Cache has been
+    reloaded from disk to mirror the actual durable state.` message
+    instead of misleading ✅. Calling `koshi_recall` immediately after
+    a failed write returns the actual durable state, not an in-memory
+    illusion.
+  - Post-durable-write orphan cleanup (subject-rename old-file delete
+    in `VaultBackend.Upsert`) is documented as intentionally outside
+    the contract — leftover files are reaped by the next
+    `ReplaceAll` and never cause data loss.
+
 ## [0.7.0] - Unreleased
 
 ### Added

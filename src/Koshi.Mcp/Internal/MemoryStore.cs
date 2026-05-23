@@ -29,6 +29,13 @@ internal sealed class MemoryStore
     /// In vault mode, <see cref="IMemoryBackend.LoadAll"/> is called first (gated by
     /// <see cref="IMemoryBackend.ShouldReload"/>) and <c>_nextId</c> is refreshed; in JSON
     /// mode, the cache is used as-is.
+    /// <para>
+    /// If <paramref name="action"/> throws <see cref="MemoryPersistenceException"/> (e.g. a
+    /// backend write failed mid-mutation), the cache is reloaded from disk before the exception
+    /// is rethrown so the in-memory list mirrors the actual durable state. A multi-step
+    /// mutation that partially succeeded on disk will therefore leave the cache pointing at
+    /// the real disk contents, not the pre-mutation snapshot.
+    /// </para>
     /// </summary>
     public T WithFreshState<T>(Func<List<MemoryRecord>, T> action)
     {
@@ -39,7 +46,31 @@ internal sealed class MemoryStore
                 _memories = _backend.LoadAll();
                 RecomputeNextId();
             }
-            return action(_memories);
+            try
+            {
+                return action(_memories);
+            }
+            catch (MemoryPersistenceException)
+            {
+                // Persistence failure mid-mutation: cache and disk may have diverged. Reload
+                // from disk so the cache mirrors the durable state. If even the reload fails
+                // (e.g. vault dir deleted concurrently), keep the existing cache rather than
+                // crash — the rethrow still surfaces the original failure.
+                try
+                {
+                    _memories = _backend.LoadAll();
+                    RecomputeNextId();
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException
+                        or System.Security.SecurityException)
+                {
+                    Console.Error.WriteLine(
+                        $"[koshi] Cache reload after persistence failure also failed: {ex.Message}. " +
+                        $"In-memory cache may be ahead of disk until next reload.");
+                }
+                throw;
+            }
         }
     }
 
@@ -62,9 +93,31 @@ internal sealed class MemoryStore
     {
         lock (_lock)
         {
-            _backend.ReplaceAll(records);
-            _memories = [.. records];
-            RecomputeNextId();
+            try
+            {
+                _backend.ReplaceAll(records);
+                _memories = [.. records];
+                RecomputeNextId();
+            }
+            catch (MemoryPersistenceException)
+            {
+                // A backend ReplaceAll can fail mid-way (e.g. VaultBackend deleted some
+                // owned files before write threw). Reload from disk so the cache reflects
+                // whatever survived rather than the stale pre-call state.
+                try
+                {
+                    _memories = _backend.LoadAll();
+                    RecomputeNextId();
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException
+                        or System.Security.SecurityException)
+                {
+                    Console.Error.WriteLine(
+                        $"[koshi] Cache reload after ReplaceAll failure also failed: {ex.Message}.");
+                }
+                throw;
+            }
         }
     }
 
