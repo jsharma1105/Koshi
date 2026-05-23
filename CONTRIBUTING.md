@@ -75,7 +75,7 @@ python/
 ├── src/koshi/         ← Python client (PyPI: koshi)
 └── tests/             ← pytest unit + 2 slow integration tests
 tests/
-├── Koshi.Core.Tests/      ← xUnit unit tests (89 tests today)
+├── Koshi.Core.Tests/      ← xUnit unit tests (351 tests today)
 └── Koshi.Mcp.SmokeTest/   ← End-to-end JSON-RPC smoke harness (JIT + AOT)
 scripts/
 └── inject-manifest.py ← Release-time SHA-256 injector for the Python wheel
