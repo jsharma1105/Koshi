@@ -2,7 +2,7 @@
 
 > One-command installer for **Koshi sub-agent personas** into Claude Code and GitHub Copilot CLI.
 
-Companion tool to [`Koshi.Mcp`](https://www.nuget.org/packages/Koshi.Mcp/). Where `Koshi.Mcp` ships the **20 MCP tools** (retrieval, memory, context, team telemetry), `Koshi.Agents` ships the **personas that drive those tools** with strict allow-lists, handoff rules, and refusal patterns baked in.
+Companion tool to [`Koshi.Mcp`](https://www.nuget.org/packages/Koshi.Mcp/). Where `Koshi.Mcp` ships the **24 MCP tools** (retrieval, memory, context, team telemetry), `Koshi.Agents` ships the **personas that drive those tools** with strict allow-lists, handoff rules, and refusal patterns baked in.
 
 ## Install
 

@@ -75,7 +75,7 @@ python/
 ├── src/koshi/         ← Python client (PyPI: koshi)
 └── tests/             ← pytest unit + 2 slow integration tests
 tests/
-├── Koshi.Core.Tests/      ← xUnit unit tests (351 tests today)
+├── Koshi.Core.Tests/      ← xUnit unit tests (359 tests today)
 └── Koshi.Mcp.SmokeTest/   ← End-to-end JSON-RPC smoke harness (JIT + AOT)
 scripts/
 └── inject-manifest.py ← Release-time SHA-256 injector for the Python wheel
@@ -87,7 +87,7 @@ scripts/
    before opening a PR — this avoids wasted work.
 2. **Fork** the repository.
 3. **Branch** off `main` with a descriptive name (`feat/<short>`, `fix/<short>`).
-4. **Write tests** for new behavior. Koshi has 89+ unit tests in `Koshi.Core.Tests`
+4. **Write tests** for new behavior. Koshi has 359+ unit tests in `Koshi.Core.Tests`
    — add to them.
 5. **Run the full build** locally: `dotnet build -c Release && dotnet test`.
 6. **Open a PR** against `main`. Fill out the PR template. Link the issue.

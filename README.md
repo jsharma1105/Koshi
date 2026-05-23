@@ -108,7 +108,7 @@ track Koshi state in Git — we'll never overwrite it.
 
 ## Why you'd use this instead of writing it yourself
 
-- **It's done.** 24 tools, 351 unit tests, .NET 10, MIT. CodeQL clean (0 alerts).
+- **It's done.** 24 tools, 359 unit tests, .NET 10, MIT. CodeQL clean (0 alerts).
 - **It's local.** No API keys, no cloud, no telemetry phoning home. Same wire format and on-disk format whether you reach it via `pip`, `dotnet tool`, or the raw AOT binary.
 - **It's friction-free.** `pip install koshi` works from a fresh Python 3.10 environment — no .NET install — and auto-fetches a native AOT binary verified against SHA-256 hashes baked into the wheel.
 - **It composes.** The sub-agent personas know which tools each persona is allowed to call — so your agents don't accidentally clobber memory while searching.
@@ -146,7 +146,7 @@ src/
 python/
 └── src/koshi/                      Python client (PyPI: koshi)
 tests/
-├── Koshi.Core.Tests/               351 xUnit unit tests
+├── Koshi.Core.Tests/               359 xUnit unit tests
 └── Koshi.Mcp.SmokeTest/            End-to-end JSON-RPC smoke harness
 scripts/
 └── inject-manifest.py              Release-time hash injector for the Python wheel

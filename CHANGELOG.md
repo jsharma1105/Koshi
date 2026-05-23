@@ -5,7 +5,7 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - Unreleased
+## [0.8.0] - 2026-05-23
 
 ### Added
 - **`koshi_capture_turn` MCP tool — turn-end auto-capture for decisions.**
@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the contract — leftover files are reaped by the next
     `ReplaceAll` and never cause data loss.
 
-## [0.7.0] - Unreleased
+## [0.7.0] - 2026-05-22
 
 ### Added
 - **Multi-flavor vault adapters — Obsidian, Foam, Logseq, Dendron.**
@@ -187,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stderr warning and falls back to `obsidian`. The server never fails
   to start because of a bad flavor name.
 
-## [0.6.1] - Unreleased
+## [0.6.1] - 2026-05-22
 
 ### Added
 - **Vault file-system watcher — hot-reload without per-call directory scans.**
