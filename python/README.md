@@ -52,6 +52,16 @@ The first `Client()` call:
 
 Every method returns the formatted text response from the MCP server. The full Koshi tool reference lives in the [main README](https://github.com/jsharma1105/Koshi#mcp-tools).
 
+> 💡 **`capture_turn`** is the v0.8.0 auto-capture entry point — pass a
+> 1–3 paragraph summary plus optional `linked_pr` / `linked_commits` and
+> the server extracts decision-shape sentences (no LLM, deterministic)
+> and persists them as `Decision` memories with a provenance footer.
+> Combine with `KOSHI_MEMORY_VAULT` pointing at a Git-tracked directory
+> and your teammates inherit the same captured decisions on `git pull` —
+> the cross-platform "skip the regression" loop. See the
+> [recommended snippet](https://github.com/jsharma1105/Koshi/blob/main/docs/copilot-instructions-snippet.md)
+> for the agent-steering text.
+
 ## Environment variables
 
 | Var | Effect |
