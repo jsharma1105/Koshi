@@ -119,6 +119,89 @@ track Koshi state in Git — we'll never overwrite it.
 
 ---
 
+## Skip the regression: auto-capture decisions, share them across platforms
+
+The single biggest reason teammates repeat the same regression is that the
+*reasoning* behind a fix never leaves the original PR description. Koshi's
+**`koshi_capture_turn`** tool (added in v0.8.0) closes that loop — the agent
+itself stores the decision the moment it's made, and Git distributes it to
+every other developer on every client.
+
+### 1. The agent stores memory by itself
+
+At the end of any non-trivial turn (a regression fix, an architectural choice,
+a tricky workaround), the agent calls **one** tool:
+
+```jsonc
+koshi_capture_turn(
+  summary: "Decision: switch the cache layer from in-memory to Redis because
+            the in-process cache lost coherency across the 3 API replicas
+            during the 2026-05-21 incident.",
+  linked_pr: 123,
+  linked_commits: ["a1b2c3d"]
+)
+```
+
+Koshi runs a deterministic, pattern-based extractor over the summary
+(no LLM in the loop — AOT-friendly, no network, no hidden cost), picks out
+the decision-shape sentences, and persists each one as a `Decision` memory
+with a provenance footer (`PR #123`, `commits a1b2c3d`, capture timestamp).
+Questions, chitchat, negations, and hypothetical sentences are filtered out
+so the store stays clean.
+
+Paste the 30-line snippet at [`docs/copilot-instructions-snippet.md`](docs/copilot-instructions-snippet.md)
+into your repo's `.github/copilot-instructions.md` (or `AGENTS.md`) and any
+MCP-aware coding agent will call it reliably at the end of meaningful turns.
+
+### 2. Share across **every** platform from one binary
+
+Koshi is a single MCP server with **24 tools** — the *same* wire format and
+on-disk format whether you reach it via `pip`, `dotnet tool`, or a raw AOT
+binary. Configure it once per client; the memories your agent captures are
+visible to all of them.
+
+| Platform | One-line setup | Config file |
+|---|---|---|
+| **GitHub Copilot CLI** | `copilot mcp add koshi koshi-mcp --env KOSHI_MEMORY_VAULT=./team-memories` | `~/.copilot/mcp_config.json` |
+| **Claude Code / Desktop** | edit JSON: `{ "mcpServers": { "koshi": { "command": "koshi-mcp" } } }` | `claude_desktop_config.json` / `.claude/settings.json` |
+| **Cursor / Windsurf** | drop the same JSON into the workspace `mcp.json` | `.cursor/mcp.json` |
+| **Microsoft Agency CLI** | `agency mcp local --command koshi-mcp` | `plugin.json` (shipped) |
+| **Python host** | `pip install koshi` → `from koshi import Client` | none |
+
+Full snippets per client live in [`src/Koshi.Mcp/README.md#client-setup`](src/Koshi.Mcp/README.md#client-setup).
+
+### 3. Distribute the memories with Git, not Slack
+
+Point `KOSHI_MEMORY_VAULT` at a directory and Koshi writes **one Markdown
+file per memory** under a flavor-specific layout (Obsidian / Foam / Logseq /
+Dendron — pick yours with `KOSHI_VAULT_FLAVOR`). Commit the directory and
+your teammates inherit the same captured decisions on `git pull`:
+
+```bash
+export KOSHI_MEMORY_VAULT=./team-memories
+# the agent captures a decision...
+git add team-memories/ && git commit -m "chore(memory): cache-layer decision"
+git push
+```
+
+A teammate who clones the repo and sets the same env var sees the memory
+the next time they ask the agent _"why is the cache layer Redis here?"_ —
+no Slack archaeology, no rerunning the regression to learn the answer.
+External edits, deletes, and `git pull`s are picked up automatically via a
+filesystem watcher; see [`docs/vault-mode.md`](docs/vault-mode.md) for the
+full format spec and migration guide.
+
+### Why this beats "just write it in the PR description"
+
+| Problem with PR-description-only memory | How `koshi_capture_turn` + vault fixes it |
+|---|---|
+| Future devs don't read every old PR | The next agent session **recalls** the decision automatically on a relevant query |
+| Slack threads expire / are siloed | One Markdown file per decision, in Git, searchable forever |
+| Each client re-implements memory | One MCP server, every client (Copilot CLI, Claude, Cursor, Windsurf, Agency, Python) reads the same store |
+| Easy to forget to write it down | The agent does it at turn-end as part of "done" |
+
+---
+
 ## How it's shipped
 
 - 📦 [`Koshi.Mcp`](src/Koshi.Mcp/) — A **Model Context Protocol** server you install

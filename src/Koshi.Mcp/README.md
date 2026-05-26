@@ -413,6 +413,50 @@ in their frontmatter are reported as "unmanaged notes" in
 [docs/vault-mode.md](../../docs/vault-mode.md) for the full format spec,
 migration guide, and FAQ.
 
+### 3b. Auto-capture decisions at turn end (v0.8.0+) — "skip the regression"
+
+The hardest memory to keep is the one no one remembered to write down.
+`koshi_capture_turn` is the tool the agent calls at the end of any
+non-trivial turn so the *reasoning* behind the change is durable before
+anyone closes the tab.
+
+> _"We just landed a fix — capture the decision."_
+
+```jsonc
+koshi_capture_turn(
+  summary: "Decision: switch the cache layer from in-memory to Redis
+            because the per-replica cache lost coherency under load.
+            Fixed by upgrading StackExchange.Redis to 2.8.x.",
+  linked_pr: 123,
+  linked_commits: ["a1b2c3d", "e4f5g6h"],
+  auto_promote: true        // false = preview candidates without saving
+)
+```
+
+What happens:
+
+1. A deterministic pattern extractor (no LLM, no network) pulls
+   decision-shape sentences out of the summary: explicit `Decision: …`
+   markers, `X over Y because Z` comparisons, `we chose / decided /
+   picked / went with`, and `fixed by / resolved by` resolution markers.
+2. Questions, negations, hypotheticals, and short fragments are filtered
+   out so chitchat never lands in the store.
+3. Each surviving sentence becomes a `Decision` memory under the active
+   backend (JSON file or vault) with a provenance footer carrying the
+   PR number, commit SHAs, and capture timestamp.
+4. Subject-exact-match dedupe within scope means two agents capturing
+   the same decision in the same workspace produce one memory, not two.
+
+Pair this with `KOSHI_MEMORY_VAULT` and Git, and the next developer (or
+the next agent session) recalls the decision the instant they ask about
+the cache layer — they don't get to repeat the incident.
+
+To make agents call it reliably, paste the 30-line snippet at
+[`docs/copilot-instructions-snippet.md`](../../docs/copilot-instructions-snippet.md)
+into your repo's `.github/copilot-instructions.md` (or your team's
+equivalent agent-steering doc). Without that hint, agents tend to forget
+to call the tool; with it, capture-on-turn-end becomes part of "done".
+
 ### 4. Track team quality
 
 ```
@@ -447,7 +491,7 @@ weakest dimension is retrieval"_).
 │                                                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐    │
 │  │  Retrieval   │  │   Context    │  │     Memory     │    │
-│  │  Tools (5)   │  │  Tools (3)   │  │   Tools (5)    │    │
+│  │  Tools (5)   │  │  Tools (3)   │  │   Tools (9)    │    │
 │  └──────┬───────┘  └──────┬───────┘  └────────┬───────┘    │
 │         │                 │                    │           │
 │         ▼                 ▼                    ▼           │
