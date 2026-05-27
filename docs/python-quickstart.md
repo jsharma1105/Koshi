@@ -45,7 +45,7 @@ The first run does three things:
 Output looks like:
 
 ```
-Koshi MCP Server v0.8.0
+Koshi MCP Server v0.8.1
 Status: healthy
 Tools: 24 registered
 ```
@@ -154,7 +154,7 @@ timestamps the original `remember()` call wrote.
 from koshi import Client
 
 with Client() as koshi:
-    print(koshi.version())   # Koshi MCP Server v0.8.0
+    print(koshi.version())   # Koshi MCP Server v0.8.1
     print(koshi.health())    # corpus size, memory store, persistence, uptime, GC
 ```
 
@@ -243,13 +243,13 @@ and the same indexed corpus.
 # On a machine with internet:
 pip download --no-deps koshi -d ./offline-koshi
 curl -L -o koshi-mcp \
-  https://github.com/jsharma1105/Koshi/releases/download/v0.8.0/koshi-mcp-linux-x64
+  https://github.com/jsharma1105/Koshi/releases/download/v0.8.1/koshi-mcp-linux-x64
 curl -L -o koshi-mcp.sha256 \
-  https://github.com/jsharma1105/Koshi/releases/download/v0.8.0/koshi-mcp-linux-x64.sha256
+  https://github.com/jsharma1105/Koshi/releases/download/v0.8.1/koshi-mcp-linux-x64.sha256
 sha256sum -c <(awk '{print $1"  koshi-mcp"}' koshi-mcp.sha256)
 
 # Move the wheel and binary to the air-gapped machine, then:
-pip install ./offline-koshi/koshi-0.8.0-py3-none-any.whl
+pip install ./offline-koshi/koshi-0.8.1-py3-none-any.whl
 chmod +x ./koshi-mcp
 export KOSHI_BIN=./koshi-mcp
 python -c "from koshi import Client; \
