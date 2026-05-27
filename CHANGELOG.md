@@ -5,6 +5,52 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-26
+
+### Fixed (Koshi.Agents personas — closes the Copilot CLI tool-search-gating bug)
+
+- **Copilot CLI sub-agent personas now load Koshi MCP tools at startup
+  instead of lazily.** All five `.github/copilot/agents/*.agent.md`
+  personas previously declared `tools: [search, read, agent]`, which
+  per the [GitHub custom-agents reference](https://docs.github.com/en/copilot/reference/custom-agents-configuration)
+  enables *only* those built-in aliases and silently excludes every
+  unlisted MCP tool. The result: invoking `koshi-librarian`,
+  `koshi-memory-keeper`, `koshi-context-packer`, `koshi-quality-coach`,
+  or `koshi-orchestrator` from Copilot CLI started the sub-agent with
+  **zero Koshi tools in its default toolset**, forcing each one to
+  rediscover them via tool-search before any work could happen. The
+  Claude Code personas (`.claude/agents/*.md`) were unaffected — they
+  already used explicit `mcp__koshi__koshi_*` allow-lists. Fix:
+  rewrite every `tools` list to spell out each Koshi tool using the
+  documented `koshi/<tool>` namespacing, in parity with the Claude
+  twins; drop the built-in aliases entirely so personas operate
+  strictly through Koshi MCP tools (preserving pillar isolation).
+- **Memory pillar parity with README/AGENTS.md.** The
+  `koshi-memory-keeper` persona previously allowed only 5 memory tools
+  + health, missing the four v0.8.0 additions (`koshi_capture_turn`,
+  `koshi_memory_export_to_vault`, `koshi_memory_import_from_vault`,
+  `koshi_memory_sync_vault`). Allow-lists in both the Claude and
+  Copilot variants now include all nine memory tools. The
+  `koshi-orchestrator` persona is expanded from 20 to **all 24**
+  Koshi tools; its "Memory (5 tools)" summary section is updated to
+  "(9 tools)" and lists each tool by name.
+- **Persona body text refreshed** where counts and "Tools you own"
+  tables had drifted from the actual MCP surface.
+
+### Release scope
+
+- `Koshi.Agents` 0.8.1 carries the persona fix (all five `.agent.md`
+  files + two `.md` files are embedded as `<EmbeddedResource>` in the
+  Agents package, so existing global installs do not auto-update
+  without a release).
+- `Koshi.Mcp` 0.8.1 is bit-for-bit functionally identical to 0.8.0 —
+  no server-side source changes — but the version is bumped in sync
+  with `Koshi.Agents` to keep the unified release tagging convention
+  the project follows.
+- Native AOT binaries (`koshi-mcp-<rid>`) and the Python `koshi` wheel
+  are republished at 0.8.1 so the manifest hashes and binary version
+  assertions in the smoke tests line up with the tag.
+
 ## [0.8.0] - 2026-05-23
 
 ### Added
