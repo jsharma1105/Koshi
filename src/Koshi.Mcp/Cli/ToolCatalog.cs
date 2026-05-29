@@ -70,6 +70,15 @@ internal static class ToolCatalog
             var parameters = new List<ToolParameter>();
             foreach (var p in method.GetParameters())
             {
+                // Skip SDK-injected parameters — these are wired by the MCP
+                // host (RequestContext<T>, McpServer, IMcpServer, IServiceProvider,
+                // CancellationToken) and must not appear in `--describe` output
+                // or be treated as user-supplied arguments (#69 rubber-duck
+                // catch — otherwise koshi_index_directory's new `context` /
+                // `cancellationToken` params would leak through #67's offline
+                // tool catalog).
+                if (IsSdkInjectedParameter(p.ParameterType)) continue;
+
                 var pDesc = p.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
                 parameters.Add(new ToolParameter(
                     Name: p.Name ?? "(unnamed)",
@@ -109,6 +118,33 @@ internal static class ToolCatalog
         if (t == typeof(float) || t == typeof(double) || t == typeof(decimal)) return "number";
         if (t == typeof(bool)) return "boolean";
         return t.Name;
+    }
+
+    /// <summary>
+    /// MCP-SDK-injected parameter types that the host wires up automatically
+    /// and that must NOT be surfaced to users via <c>--describe</c> (#67) or
+    /// counted as user-supplied tool arguments (#69). These mirror the canonical
+    /// SDK injection rules — <c>RequestContext&lt;T&gt;</c>, <see cref="IServiceProvider"/>,
+    /// <see cref="CancellationToken"/>, plus the <c>McpServer</c> / <c>IMcpServer</c>
+    /// types that tool methods may declare directly per the SDK sample in
+    /// <c>docs/concepts/progress/samples/server/Tools/LongRunningTools.cs</c>.
+    /// Matching is by full type name (not <c>typeof()</c>) to avoid taking a
+    /// hard reference on every SDK type and to stay trim-safe.
+    /// </summary>
+    internal static bool IsSdkInjectedParameter(Type t)
+    {
+        if (t == typeof(CancellationToken)) return true;
+        if (t == typeof(IServiceProvider)) return true;
+
+        // Strip generic arity so RequestContext`1 matches.
+        var fullName = t.IsGenericType
+            ? t.GetGenericTypeDefinition().FullName
+            : t.FullName;
+        if (fullName is null) return false;
+
+        return fullName == "ModelContextProtocol.Server.RequestContext`1"
+            || fullName == "ModelContextProtocol.Server.McpServer"
+            || fullName == "ModelContextProtocol.Server.IMcpServer";
     }
 
     internal static string FormatDefault(object? value)

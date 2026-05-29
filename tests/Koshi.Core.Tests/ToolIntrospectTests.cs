@@ -147,6 +147,48 @@ public sealed class ToolIntrospectTests
         Assert.Equal("42", ToolCatalog.FormatDefault(42));
     }
 
+    [Fact]
+    public void IsSdkInjectedParameter_filters_the_canonical_sdk_types()
+    {
+        // The MCP SDK auto-wires these parameter types so they must NOT
+        // appear in user-facing tool catalogs. Regression for #69.
+        Assert.True(ToolCatalog.IsSdkInjectedParameter(typeof(CancellationToken)));
+        Assert.True(ToolCatalog.IsSdkInjectedParameter(typeof(IServiceProvider)));
+        Assert.True(ToolCatalog.IsSdkInjectedParameter(typeof(ModelContextProtocol.Server.McpServer)));
+        Assert.True(ToolCatalog.IsSdkInjectedParameter(
+            typeof(ModelContextProtocol.Server.RequestContext<ModelContextProtocol.Protocol.CallToolRequestParams>)));
+
+        // Real user parameter types must not be filtered.
+        Assert.False(ToolCatalog.IsSdkInjectedParameter(typeof(string)));
+        Assert.False(ToolCatalog.IsSdkInjectedParameter(typeof(int)));
+        Assert.False(ToolCatalog.IsSdkInjectedParameter(typeof(bool?)));
+    }
+
+    [Fact]
+    public void Index_directory_does_not_expose_sdk_injected_parameters()
+    {
+        // Regression for #69: IndexDirectory took two new injected parameters
+        // (RequestContext<CallToolRequestParams> + CancellationToken). The
+        // offline tool catalog (#67) must hide both so agents don't try to
+        // pass them as user arguments and `--describe` output stays clean.
+        var tool = ToolCatalog.Find("koshi_index_directory");
+        Assert.NotNull(tool);
+
+        var paramNames = tool!.Parameters.Select(p => p.Name).ToList();
+        Assert.DoesNotContain("context", paramNames);
+        Assert.DoesNotContain("cancellationToken", paramNames);
+        Assert.DoesNotContain("server", paramNames);
+
+        // The user-facing surface must remain exactly these seven params.
+        Assert.Equal(
+            new[]
+            {
+                "path", "pattern", "maxFileSizeKb", "maxFiles",
+                "maxTokens", "overlapTokens", "corpus",
+            },
+            paramNames);
+    }
+
     // ─────────────────────────── ToolIntrospectCommand ──────────────────────────
 
     [Fact]
