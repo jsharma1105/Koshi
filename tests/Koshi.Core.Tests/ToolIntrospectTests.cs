@@ -128,6 +128,35 @@ public sealed class ToolIntrospectTests
         Assert.Null(format.DefaultValue);
     }
 
+    [Theory]
+    [InlineData("koshi_search")]
+    [InlineData("koshi_recall")]
+    [InlineData("koshi_compile_context")]
+    [InlineData("koshi_health")]
+    [InlineData("koshi_score_turn")]
+    [InlineData("koshi_version")]
+    [InlineData("koshi_token_count")]
+    [InlineData("koshi_budget_plan")]
+    [InlineData("koshi_memory_stats")]
+    [InlineData("koshi_list_indexed")]
+    [InlineData("koshi_team_dashboard")]
+    [InlineData("koshi_analyze_feedback")]
+    [InlineData("koshi_list_teams")]
+    public void Structured_output_wired_tools_expose_optional_format_parameter(string toolName)
+    {
+        // Anti-regression for #66: every tool wired with a structured-output
+        // envelope MUST expose an optional `format` string parameter so
+        // offline introspection (#67) and orchestrators can discover it.
+        var tool = ToolCatalog.Find(toolName);
+        Assert.NotNull(tool);
+
+        var format = tool!.Parameters.SingleOrDefault(p => p.Name == "format");
+        Assert.NotNull(format);
+        Assert.False(format!.Required);
+        Assert.Equal("string", format.Type);
+        Assert.Null(format.DefaultValue);
+    }
+
     [Fact]
     public void Friendly_type_names_map_common_clr_types_to_schema_aliases()
     {

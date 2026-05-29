@@ -437,6 +437,7 @@ public sealed class RetrievalTools
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
                 if (fmt == OutputFormat.Json)
                     return OutputFormatting.Error<SearchResultData>(
+                        "koshi_search",
                         OutputErrorCodes.AutoIndexFailed,
                         OutputFormatting.StripTextDecorations(textMsg),
                         KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
@@ -459,6 +460,7 @@ public sealed class RetrievalTools
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
                 if (fmt == OutputFormat.Json)
                     return OutputFormatting.Error<SearchResultData>(
+                        "koshi_search",
                         OutputErrorCodes.AutoIndexFailed,
                         OutputFormatting.StripTextDecorations(withRetry),
                         KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
@@ -486,7 +488,7 @@ public sealed class RetrievalTools
 
     private static string SearchError(OutputFormat fmt, string code, string message)
         => fmt == OutputFormat.Json
-            ? OutputFormatting.Error<SearchResultData>(code, message,
+            ? OutputFormatting.Error<SearchResultData>("koshi_search", code, message,
                 KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData)
             : "❌ " + message;
 
@@ -507,7 +509,7 @@ public sealed class RetrievalTools
                     Content: r.Chunk.Content));
             }
             var payload = new SearchResultData(query, corpusName, results.Count, hits);
-            return OutputFormatting.Ok(payload,
+            return OutputFormatting.Ok("koshi_search", payload,
                 KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
         }
 
@@ -534,24 +536,34 @@ public sealed class RetrievalTools
         "WHEN TO CALL: Before searching, to confirm which corpora and files are actually indexed; or " +
         "to verify that an index_directory call landed.\n" +
         "WHAT IT DOES: Lists every indexed corpus with chunk and source counts. Pass a corpus name " +
-        "for per-source chunk-level detail.\n" +
+        "for per-source chunk-level detail. Pass format=\"json\" for a parseable envelope (#66).\n" +
         "WHAT YOU GIVE IT: corpus (optional — omit for summary of all corpora; name for detail).")]
     public static string ListIndexed(
         [Description("Optional corpus name. When omitted, lists every corpus (default + named). When provided, shows per-source chunk counts for that corpus only.")]
-        string? corpus = null)
+        string? corpus = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<ListIndexedResultData>("koshi_list_indexed", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeListIndexedResultData)
+                : "❌ " + fmtErr;
+
         EnsureCorpusLoaded();
 
         // Single-corpus detailed view.
         if (!string.IsNullOrWhiteSpace(corpus))
         {
-            return IsDefaultCorpus(corpus)
-                ? DescribeDefaultCorpusDetail()
-                : DescribeNamedCorpusDetail(corpus!.Trim());
+            return fmt == OutputFormat.Json
+                ? BuildListIndexedDetailJson(corpus!.Trim())
+                : (IsDefaultCorpus(corpus)
+                    ? DescribeDefaultCorpusDetail()
+                    : DescribeNamedCorpusDetail(corpus!.Trim()));
         }
 
         // Multi-corpus summary.
-        var sb = new System.Text.StringBuilder();
         var corpora = new List<(string name, int chunks, int sources, string? path, bool snapshot)>();
 
         lock (_lock)
@@ -568,9 +580,27 @@ public sealed class RetrievalTools
             corpora.Add((kv.Key, kv.Value.Chunks.Count, sources, kv.Value.SourcePath, false));
         }
 
+        if (fmt == OutputFormat.Json)
+        {
+            var entries = corpora
+                .OrderBy(c => c.name, StringComparer.OrdinalIgnoreCase)
+                .Select(c => new IndexedCorpusEntry(c.name, c.chunks, c.sources, c.path))
+                .ToList();
+            var payload = new ListIndexedResultData(
+                Mode: "summary",
+                Corpus: null,
+                TotalChunks: corpora.Sum(c => c.chunks),
+                TotalSources: corpora.Sum(c => c.sources),
+                Corpora: entries,
+                Sources: new List<IndexedSourceEntry>());
+            return OutputFormatting.Ok("koshi_list_indexed", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeListIndexedResultData);
+        }
+
         if (corpora.Count == 0)
             return "No corpora indexed yet. Call koshi_index_directory or koshi_index first.";
 
+        var sb = new System.Text.StringBuilder();
         sb.AppendLine($"{corpora.Count} corpus{(corpora.Count == 1 ? "" : "es")} indexed:");
         foreach (var c in corpora.OrderBy(c => c.name, StringComparer.OrdinalIgnoreCase))
         {
@@ -579,6 +609,71 @@ public sealed class RetrievalTools
             sb.AppendLine();
         }
         return sb.ToString();
+    }
+
+    private static string BuildListIndexedDetailJson(string corpusName)
+    {
+        List<Chunk>? chunks = null;
+        string? path = null;
+
+        if (IsDefaultCorpus(corpusName))
+        {
+            lock (_lock)
+            {
+                if (_isIndexed && _indexedChunks.Count > 0)
+                {
+                    chunks = _indexedChunks.ToList();
+                    path = _indexedFromPath;
+                    corpusName = DefaultCorpusName;
+                }
+            }
+        }
+        else if (_extraCorpora.TryGetValue(corpusName, out var named))
+        {
+            chunks = named.Chunks.ToList();
+            path = named.SourcePath;
+        }
+        else
+        {
+            return OutputFormatting.Error<ListIndexedResultData>("koshi_list_indexed", OutputErrorCodes.UnknownCorpus,
+                $"Unknown corpus '{corpusName}'. Call koshi_list_indexed() to see available corpora.",
+                KoshiOutputJsonContext.Default.JsonEnvelopeListIndexedResultData);
+        }
+
+        if (chunks is null || chunks.Count == 0)
+        {
+            var emptyPayload = new ListIndexedResultData(
+                Mode: "detail",
+                Corpus: corpusName,
+                TotalChunks: 0,
+                TotalSources: 0,
+                Corpora: new List<IndexedCorpusEntry>(),
+                Sources: new List<IndexedSourceEntry>());
+            return OutputFormatting.Ok("koshi_list_indexed", emptyPayload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeListIndexedResultData);
+        }
+
+        var bySource = chunks
+            .GroupBy(c => c.Metadata.Source)
+            .OrderBy(g => g.Key)
+            .Select(g => new IndexedSourceEntry(
+                Source: g.Key,
+                Chunks: g.Count(),
+                Type: g.First().Metadata.DocumentType))
+            .ToList();
+
+        var payload = new ListIndexedResultData(
+            Mode: "detail",
+            Corpus: corpusName,
+            TotalChunks: chunks.Count,
+            TotalSources: bySource.Count,
+            Corpora: new List<IndexedCorpusEntry>
+            {
+                new(corpusName, chunks.Count, bySource.Count, path),
+            },
+            Sources: bySource);
+        return OutputFormatting.Ok("koshi_list_indexed", payload,
+            KoshiOutputJsonContext.Default.JsonEnvelopeListIndexedResultData);
     }
 
     private static string DescribeDefaultCorpusDetail()

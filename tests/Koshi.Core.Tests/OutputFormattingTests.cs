@@ -7,8 +7,17 @@ namespace Koshi.Core.Tests;
 /// Tests for <see cref="OutputFormatting"/> — the helper that resolves the
 /// <c>format</c> param and serialises envelopes for #66 Phase 1.
 /// </summary>
+[Collection("OutputFormatting-env")]
 public class OutputFormattingTests
 {
+    public OutputFormattingTests()
+    {
+        // Guard against a developer running tests in a shell where
+        // KOSHI_OUTPUT_FORMAT is set — every test in this class assumes
+        // "no env override" unless it sets one explicitly.
+        Environment.SetEnvironmentVariable(OutputFormatting.FormatEnvVar, null);
+        OutputFormatting.ResetEnvDefaultForTesting();
+    }
     [Fact]
     public void Resolve_returns_text_when_param_is_null()
     {
@@ -92,8 +101,9 @@ public class OutputFormattingTests
     public void Ok_serializes_full_envelope_shape()
     {
         var data = new SearchResultData("hello", "default", 0, new List<SearchHitData>());
-        var output = OutputFormatting.Ok(data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+        var output = OutputFormatting.Ok("koshi_search", data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
         StructuredOutputAssertions.AssertOkEnvelope(output);
+        Assert.Contains("\"tool\":\"koshi_search\"", output);
     }
 
     [Fact]
@@ -103,7 +113,7 @@ public class OutputFormattingTests
         {
             new(1, 0.95, "src/foo.cs", "chunk-1", "hello world"),
         });
-        var output = OutputFormatting.Ok(data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+        var output = OutputFormatting.Ok("koshi_search", data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
         Assert.Contains("\"schema_version\":1", output);
         Assert.Contains("\"chunk_id\":\"chunk-1\"", output);
         Assert.DoesNotContain("ChunkId", output);
@@ -114,7 +124,7 @@ public class OutputFormattingTests
     public void Ok_envelope_always_includes_error_null_key()
     {
         var data = new SearchResultData("q", "default", 0, new List<SearchHitData>());
-        var output = OutputFormatting.Ok(data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+        var output = OutputFormatting.Ok("koshi_search", data, KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
         Assert.Contains("\"error\":null", output);
     }
 
@@ -122,16 +132,19 @@ public class OutputFormattingTests
     public void Error_serializes_full_envelope_shape()
     {
         var output = OutputFormatting.Error<SearchResultData>(
+            "koshi_search",
             OutputErrorCodes.EmptyQuery,
             "Query must not be empty.",
             KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
         StructuredOutputAssertions.AssertErrorEnvelope(output, OutputErrorCodes.EmptyQuery);
+        Assert.Contains("\"tool\":\"koshi_search\"", output);
     }
 
     [Fact]
     public void Error_envelope_always_includes_data_null_key()
     {
         var output = OutputFormatting.Error<SearchResultData>(
+            "koshi_search",
             OutputErrorCodes.NoIndex,
             "No corpus has been indexed.",
             KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);

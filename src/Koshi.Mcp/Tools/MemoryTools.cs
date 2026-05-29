@@ -270,7 +270,7 @@ public sealed class MemoryTools
                         CreatedAt: mem.CreatedAt));
                 }
                 var payload = new RecallResultData(query, type, scored.Count, jsonMemories);
-                return OutputFormatting.Ok(payload,
+                return OutputFormatting.Ok("koshi_recall", payload,
                     KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
             }
 
@@ -299,7 +299,7 @@ public sealed class MemoryTools
         if (fmt == OutputFormat.Json)
         {
             var payload = new RecallResultData(query, type, 0, []);
-            return OutputFormatting.Ok(payload,
+            return OutputFormatting.Ok("koshi_recall", payload,
                 KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
         }
         return "❌ " + textMessage;
@@ -307,7 +307,7 @@ public sealed class MemoryTools
 
     private static string RecallError(OutputFormat fmt, string code, string message)
         => fmt == OutputFormat.Json
-            ? OutputFormatting.Error<RecallResultData>(code, message,
+            ? OutputFormatting.Error<RecallResultData>("koshi_recall", code, message,
                 KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData)
             : "❌ " + message;
 
@@ -372,15 +372,54 @@ public sealed class MemoryTools
         "WHEN TO CALL: When the user asks how much is remembered, what's dominating memory, or whether " +
         "persistence is wired correctly. Useful before suggesting koshi_forget or vault export.\n" +
         "WHAT IT DOES: Reports total count, counts by type, top subjects, average confidence, backend " +
-        "kind, persistence path, and (vault backends) unmanaged-note and duplicate-id warnings.")]
-    public static string MemoryStats()
+        "kind, persistence path, and (vault backends) unmanaged-note and duplicate-id warnings. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
+    public static string MemoryStats(
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<MemoryStatsResultData>("koshi_memory_stats", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeMemoryStatsResultData)
+                : "❌ " + fmtErr;
+
         return _store.WithFreshState(all =>
         {
+            var backend = _store.Backend;
+
+            if (fmt == OutputFormat.Json)
+            {
+                var byTypeList = all
+                    .GroupBy(m => m.Type.ToString())
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => new MemoryStatsByTypeEntry(g.Key, g.Count()))
+                    .ToList();
+
+                var byScopeList = all
+                    .GroupBy(m => ScopeLabel(m.Scope))
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => new MemoryStatsByScopeEntry(g.Key, g.Count()))
+                    .ToList();
+
+                var payload = new MemoryStatsResultData(
+                    TotalRecords: all.Count,
+                    Backend: backend.BackendKind,
+                    ByType: byTypeList,
+                    ByScope: byScopeList,
+                    OldestCreatedAt: all.Count == 0 ? null : all.Min(m => m.CreatedAt),
+                    NewestCreatedAt: all.Count == 0 ? null : all.Max(m => m.CreatedAt),
+                    AvgConfidence: all.Count == 0 ? 0.0 : all.Average(m => (double)m.Confidence),
+                    PersistenceEnabled: backend.IsEnabled,
+                    PersistencePath: backend.IsEnabled ? backend.Location : null);
+                return OutputFormatting.Ok("koshi_memory_stats", payload,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeMemoryStatsResultData);
+            }
+
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"═══ Memory Stats ({all.Count} of {MaxMemories} max) ═══\n");
 
-            var backend = _store.Backend;
             sb.AppendLine($"  Backend:        {backend.BackendKind}");
             sb.AppendLine($"  Persistence:    {(backend.IsEnabled ? $"enabled → {backend.Location}" : "disabled (in-memory only)")}");
             if (backend.BackendKind == "vault")
@@ -420,6 +459,16 @@ public sealed class MemoryTools
 
             return sb.ToString();
         });
+    }
+
+    private static string ScopeLabel(Koshi.Core.Memory.MemoryScope scope)
+    {
+        var user = scope.UserId == "*" ? "*" : scope.UserId;
+        var ws = scope.WorkspaceId;
+        var thread = scope.ThreadId;
+        return thread is null
+            ? $"user={user};workspace={ws}"
+            : $"user={user};workspace={ws};thread={thread}";
     }
 
     [McpServerTool(Name = "koshi_forget"), Description(

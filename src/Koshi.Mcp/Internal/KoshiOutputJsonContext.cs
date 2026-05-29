@@ -32,4 +32,12 @@ namespace Koshi.Mcp.Internal;
 [JsonSerializable(typeof(JsonEnvelope<CompileContextResultData>))]
 [JsonSerializable(typeof(JsonEnvelope<HealthResultData>))]
 [JsonSerializable(typeof(JsonEnvelope<ScoreTurnResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<VersionResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<TokenCountResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<BudgetPlanResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<MemoryStatsResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ListIndexedResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ListTeamsResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<TeamDashboardResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<AnalyzeFeedbackResultData>))]
 internal sealed partial class KoshiOutputJsonContext : JsonSerializerContext;

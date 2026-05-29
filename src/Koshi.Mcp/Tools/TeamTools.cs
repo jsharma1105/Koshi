@@ -170,7 +170,7 @@ public sealed class TeamTools
         var fmt = OutputFormatting.Resolve(format, out var fmtErr);
         if (fmtErr is not null)
             return fmt == OutputFormat.Json
-                ? OutputFormatting.Error<ScoreTurnResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                ? OutputFormatting.Error<ScoreTurnResultData>("koshi_score_turn", OutputErrorCodes.InvalidFormat, fmtErr,
                     KoshiOutputJsonContext.Default.JsonEnvelopeScoreTurnResultData)
                 : "❌ " + fmtErr;
 
@@ -236,7 +236,7 @@ public sealed class TeamTools
                 Target: target,
                 IssuesParsed: parsedIssues,
                 PersistenceWarning: warning is null ? null : OutputFormatting.StripTextDecorations(warning));
-            return OutputFormatting.Ok(payload,
+            return OutputFormatting.Ok("koshi_score_turn", payload,
                 KoshiOutputJsonContext.Default.JsonEnvelopeScoreTurnResultData);
         }
 
@@ -279,14 +279,58 @@ public sealed class TeamTools
         "quality, or when reviewing score trends. Requires the team to be registered.\n" +
         "WHAT IT DOES: Renders the team's quality dashboard — score trend, latency / budget / cache " +
         "metrics, target-attainment, and recommendations.\n" +
-        "WHAT YOU GIVE IT: teamId (required).")]
+        "WHAT YOU GIVE IT: teamId (required). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string Dashboard(
-        [Description("Team ID to show dashboard for")] string teamId)
+        [Description("Team ID to show dashboard for")] string teamId,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<TeamDashboardResultData>("koshi_team_dashboard", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeTeamDashboardResultData)
+                : "❌ " + fmtErr;
+
         if (_registry.GetTeam(teamId) is null)
-            return $"❌ Team '{teamId}' not found. Register it first with koshi_register_team.";
+        {
+            var msg = $"Team '{teamId}' not found. Register it first with koshi_register_team.";
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<TeamDashboardResultData>("koshi_team_dashboard", OutputErrorCodes.UnknownTeam, msg,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeTeamDashboardResultData)
+                : "❌ " + msg;
+        }
 
         var dashboard = _registry.BuildDashboard(teamId);
+
+        if (fmt == OutputFormat.Json)
+        {
+            var trend = dashboard.QualityTrend
+                .Select(kv => new TeamTrendPointEntry(kv.Key, kv.Value))
+                .ToList();
+
+            var payload = new TeamDashboardResultData(
+                TeamId: dashboard.TeamId,
+                TeamName: dashboard.TeamName,
+                Registered: true,
+                TotalTurns: dashboard.TotalTurns,
+                TotalSessions: dashboard.TotalSessions,
+                TotalTokensConsumed: dashboard.TotalTokensConsumed,
+                AvgQualityScore: dashboard.AvgQualityScore,
+                AvgCacheHitRate: dashboard.AvgCacheHitRate,
+                AvgBudgetUtilization: dashboard.AvgBudgetUtilization,
+                AvgLatencyMs: dashboard.AvgLatencyMs,
+                FallbackCount: dashboard.FallbackCount,
+                FeedbackCount: dashboard.FeedbackCount,
+                AvgUserRating: dashboard.AvgUserRating,
+                QualityTarget: dashboard.QualityTarget,
+                TargetHitRate: dashboard.TargetHitRate,
+                QualityTrend: trend,
+                Recommendations: dashboard.Recommendations.ToList());
+            return OutputFormatting.Ok("koshi_team_dashboard", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeTeamDashboardResultData);
+        }
+
         var lines = DashboardRenderer.Render(dashboard);
         return string.Join("\n", lines);
     }
@@ -296,17 +340,56 @@ public sealed class TeamTools
         "scored for this team. Returns ⚠ if there is insufficient data.\n" +
         "WHAT IT DOES: Trend analysis across recent scores — direction, weakest dimension, and concrete " +
         "config-key adjustments (e.g., raise topK, lower budget).\n" +
-        "WHAT YOU GIVE IT: teamId (required).")]
+        "WHAT YOU GIVE IT: teamId (required). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string AnalyzeFeedback(
-        [Description("Team ID to analyze")] string teamId)
+        [Description("Team ID to analyze")] string teamId,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<AnalyzeFeedbackResultData>("koshi_analyze_feedback", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeAnalyzeFeedbackResultData)
+                : "❌ " + fmtErr;
+
         if (_registry.GetTeam(teamId) is null)
-            return $"❌ Team '{teamId}' not found.";
+        {
+            var msg = $"Team '{teamId}' not found.";
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<AnalyzeFeedbackResultData>("koshi_analyze_feedback", OutputErrorCodes.UnknownTeam, msg,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeAnalyzeFeedbackResultData)
+                : "❌ " + msg;
+        }
 
         var analysis = _loop.Analyze(teamId);
 
         if (analysis.TeamId == "(insufficient data)")
-            return "⚠️ Not enough data yet. Score at least 3 turns first.";
+        {
+            const string msg = "Not enough data yet. Score at least 3 turns first.";
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<AnalyzeFeedbackResultData>("koshi_analyze_feedback", OutputErrorCodes.InsufficientData, msg,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeAnalyzeFeedbackResultData)
+                : "⚠️ " + msg;
+        }
+
+        if (fmt == OutputFormat.Json)
+        {
+            var adjustments = analysis.SuggestedAdjustments
+                .Select(a => new ConfigAdjustmentEntry(a.ConfigKey, a.CurrentValue, a.SuggestedValue, a.Reason))
+                .ToList();
+
+            var payload = new AnalyzeFeedbackResultData(
+                TeamId: analysis.TeamId,
+                TurnCount: analysis.TurnCount,
+                CurrentAvgScore: analysis.CurrentAvgScore,
+                Trend: analysis.Trend,
+                TrendDirection: analysis.TrendDirection.ToString(),
+                WeakestDimension: analysis.WeakestDimension,
+                SuggestedAdjustments: adjustments);
+            return OutputFormatting.Ok("koshi_analyze_feedback", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeAnalyzeFeedbackResultData);
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Feedback Analysis: {teamId} ═══\n");
@@ -344,10 +427,42 @@ public sealed class TeamTools
         "WHEN TO CALL: To check which teams are registered before scoring or analysing, or when the " +
         "user asks 'which teams do we have set up?'.\n" +
         "WHAT IT DOES: Lists every registered team with id, name, budget, topK, target, and current " +
-        "average quality score.")]
-    public static string ListTeams()
+        "average quality score. Pass format=\"json\" for a parseable envelope (#66).")]
+    public static string ListTeams(
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<ListTeamsResultData>("koshi_list_teams", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeListTeamsResultData)
+                : "❌ " + fmtErr;
+
         var teams = _registry.ListTeams();
+
+        if (fmt == OutputFormat.Json)
+        {
+            var entries = teams.Select(team =>
+            {
+                var scores = _registry.GetScores(team.TeamId);
+                var avgScore = scores.Count > 0 ? scores.Average(s => s.Composite) : 0.0;
+                return new RegisteredTeamEntry(
+                    Id: team.TeamId,
+                    Name: team.Name,
+                    ContextBudgetTokens: team.Config.ContextBudgetTokens,
+                    RetrievalTopK: team.Config.RetrievalTopK,
+                    QualityTarget: team.Config.QualityTarget,
+                    CreatedAt: team.CreatedAt,
+                    TurnsScored: scores.Count,
+                    AvgQuality: avgScore);
+            }).ToList();
+
+            var payload = new ListTeamsResultData(TotalTeams: entries.Count, Teams: entries);
+            return OutputFormatting.Ok("koshi_list_teams", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeListTeamsResultData);
+        }
+
         if (teams.Count == 0)
             return "No teams registered. Use koshi_register_team to create one.";
 

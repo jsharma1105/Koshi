@@ -46,7 +46,7 @@ public sealed class ContextTools
         var fmt = OutputFormatting.Resolve(format, out var fmtErr);
         if (fmtErr is not null)
             return fmt == OutputFormat.Json
-                ? OutputFormatting.Error<CompileContextResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                ? OutputFormatting.Error<CompileContextResultData>("koshi_compile_context", OutputErrorCodes.InvalidFormat, fmtErr,
                     KoshiOutputJsonContext.Default.JsonEnvelopeCompileContextResultData)
                 : "❌ " + fmtErr;
 
@@ -128,7 +128,7 @@ public sealed class ContextTools
                 CacheableTokens: result.Metrics.CacheableTokens,
                 CacheRatio: result.Metrics.CacheRatio);
             var payload = new CompileContextResultData(metrics, sections);
-            return OutputFormatting.Ok(payload,
+            return OutputFormatting.Ok("koshi_compile_context", payload,
                 KoshiOutputJsonContext.Default.JsonEnvelopeCompileContextResultData);
         }
 
@@ -193,12 +193,33 @@ public sealed class ContextTools
         "WHEN TO CALL: To check whether a string fits a budget, or to size a prospective chunk before " +
         "sending it to an LLM. Useful inside loops that build prompts.\n" +
         "WHAT IT DOES: Returns token count using the GPT-4 tokenizer plus character count and chars/token " +
-        "ratio. Deterministic. No network.\n" +
+        "ratio. Deterministic. No network. Pass format=\"json\" for a parseable envelope (#66).\n" +
         "WHAT YOU GIVE IT: text (the string to measure).")]
     public static string CountTokens(
-        [Description("The text to count tokens for")] string text)
+        [Description("The text to count tokens for")] string text,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<TokenCountResultData>("koshi_token_count", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeTokenCountResultData)
+                : "❌ " + fmtErr;
+
         int count = TokenCounters.Shared.CountTokens(text);
+
+        if (fmt == OutputFormat.Json)
+        {
+            var charsPerToken = count > 0 ? (double)text.Length / count : 0.0;
+            var payload = new TokenCountResultData(
+                Tokens: count,
+                Characters: text.Length,
+                CharsPerToken: charsPerToken);
+            return OutputFormatting.Ok("koshi_token_count", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeTokenCountResultData);
+        }
+
         return $"{count} tokens ({text.Length} characters, ratio: {(float)text.Length / count:F1} chars/token)";
     }
 
@@ -209,7 +230,8 @@ public sealed class ContextTools
         "WHAT IT DOES: Computes fixed costs (system + team), then suggests how to divide the remaining " +
         "budget across retrieval/memory/history. Default split is 50/25/25; pass reserveHistory=false " +
         "for one-shot/batch flows that don't supply conversation history (reclaims the 25% history slice " +
-        "into a 67/33 retrieval/memory split). Override entirely with retrievalPct/memoryPct/historyPct.\n" +
+        "into a 67/33 retrieval/memory split). Override entirely with retrievalPct/memoryPct/historyPct. " +
+        "Pass format=\"json\" for a parseable envelope (#66).\n" +
         "WHAT YOU GIVE IT: totalBudget (default 8192); systemPrompt / teamContext (optional, sized for " +
         "fixed cost); reserveHistory (default true); retrievalPct + memoryPct + historyPct (optional " +
         "explicit override — must sum to 100).")]
@@ -226,8 +248,17 @@ public sealed class ContextTools
         [Description("Explicit memory percentage 0-100 (optional, paired with retrievalPct + historyPct).")]
         int? memoryPct = null,
         [Description("Explicit history percentage 0-100 (optional, paired with retrievalPct + memoryPct).")]
-        int? historyPct = null)
+        int? historyPct = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<BudgetPlanResultData>("koshi_budget_plan", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeBudgetPlanResultData)
+                : "❌ " + fmtErr;
+
         if (totalBudget < 1) totalBudget = 8192;
         var tokenCounter = TokenCounters.Shared;
 
@@ -236,11 +267,49 @@ public sealed class ContextTools
         int fixedCost = systemTokens + teamTokens;
         int remaining = Math.Max(0, totalBudget - fixedCost);
 
-        var (rPct, mPct, hPct, splitNote) = ResolveSplit(reserveHistory, retrievalPct, memoryPct, historyPct);
+        int rPct, mPct, hPct;
+        string splitNote;
+        try
+        {
+            (rPct, mPct, hPct, splitNote) = ResolveSplit(reserveHistory, retrievalPct, memoryPct, historyPct);
+        }
+        catch (ArgumentException ex)
+        {
+            // Bad explicit-split combinations should not crash JSON callers —
+            // surface as an envelope so orchestrators can recover gracefully.
+            // Text mode preserves the historical contract and rethrows so the
+            // MCP framework can map it to a tool-call error.
+            if (fmt == OutputFormat.Json)
+                return OutputFormatting.Error<BudgetPlanResultData>("koshi_budget_plan", OutputErrorCodes.InvalidSplit,
+                    ex.Message, KoshiOutputJsonContext.Default.JsonEnvelopeBudgetPlanResultData);
+            throw;
+        }
 
         int retrievalTokens = remaining * rPct / 100;
         int memoryTokens = remaining * mPct / 100;
         int historyTokens = remaining * hPct / 100;
+
+        if (fmt == OutputFormat.Json)
+        {
+            var payload = new BudgetPlanResultData(
+                TotalBudget: totalBudget,
+                SystemTokens: systemTokens,
+                TeamTokens: teamTokens,
+                FixedCost: fixedCost,
+                Remaining: remaining,
+                Split: new BudgetSplitData(rPct, mPct, hPct),
+                Allocation: new BudgetAllocationData(
+                    RetrievalTokens: retrievalTokens,
+                    MemoryTokens: memoryTokens,
+                    HistoryTokens: historyTokens,
+                    RetrievalChunksEstimate: retrievalTokens / 512,
+                    MemoryItemsEstimate: memoryTokens / 100,
+                    HistoryTurnsEstimate: historyTokens / 200),
+                CacheSavingsEstimate: (int)Math.Round(fixedCost * 0.5),
+                SplitNote: string.IsNullOrEmpty(splitNote) ? null : splitNote);
+            return OutputFormatting.Ok("koshi_budget_plan", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeBudgetPlanResultData);
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Budget Plan ({totalBudget} tokens total) ═══\n");
