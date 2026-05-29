@@ -1,4 +1,5 @@
 <!-- Koshi MCP discipline — https://github.com/jsharma1105/Koshi -->
+<!-- koshi-mcp:steering-template:v1 -->
 
 ## Koshi memory + retrieval
 

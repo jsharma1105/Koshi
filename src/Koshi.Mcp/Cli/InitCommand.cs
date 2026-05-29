@@ -218,6 +218,81 @@ internal static class InitCommand
             }
         }
 
+        // ── 3d. Install per-ecosystem steering templates (#77 Layer 4) ─────
+        // Project-level, not per-client: the same checkout may be opened by
+        // multiple clients in parallel. By default we install AGENTS.md (the
+        // universal fallback) plus the templates whose target is already in
+        // use or whose client was detected/requested — this keeps a Cursor-
+        // only repo from sprouting Copilot- and Windsurf-flavoured files.
+        // Pass --all-templates to override and drop every template.
+        if (!opts.SkipTemplates)
+        {
+            stdout.WriteLine();
+            stdout.WriteLine("==> templates");
+
+            var detectedClientSet = new HashSet<PersonaClient>(clients);
+            bool wantCopilot = opts.AllTemplates
+                || detectedClientSet.Contains(PersonaClient.Copilot)
+                || File.Exists(Path.Combine(projectRoot, ".github", "copilot-instructions.md"));
+            bool wantCursor = opts.AllTemplates
+                || Directory.Exists(Path.Combine(projectRoot, ".cursor"))
+                || File.Exists(Path.Combine(projectRoot, ".cursorrules"));
+            bool wantWindsurf = opts.AllTemplates
+                || Directory.Exists(Path.Combine(projectRoot, ".windsurf"))
+                || File.Exists(Path.Combine(projectRoot, ".windsurfrules"));
+
+            bool Filter(SteeringTemplate t) => t.Name switch
+            {
+                "AGENTS.md" => true, // universal fallback
+                ".github/copilot-instructions.md" => wantCopilot,
+                ".cursorrules" => wantCursor,
+                ".windsurfrules" => wantWindsurf,
+                _ => false,
+            };
+
+            var templateResults = SteeringTemplateInstaller.InstallMatching(
+                projectRoot, opts.ForceTemplates, Filter);
+
+            int wrote = 0, appended = 0, present = 0, overwrote = 0, errors = 0;
+            foreach (var r in templateResults)
+            {
+                switch (r.Outcome)
+                {
+                    case TemplateInstallOutcome.Written:
+                        wrote++;
+                        stdout.WriteLine($"  template '{r.TemplateName}' → {r.TargetPath} (new)");
+                        break;
+                    case TemplateInstallOutcome.Appended:
+                        appended++;
+                        stdout.WriteLine($"  template '{r.TemplateName}' → {r.TargetPath} (appended Koshi block)");
+                        break;
+                    case TemplateInstallOutcome.AlreadyPresent:
+                        present++;
+                        break;
+                    case TemplateInstallOutcome.Overwrote:
+                        overwrote++;
+                        stdout.WriteLine($"  template '{r.TemplateName}' → {r.TargetPath} (overwrote)");
+                        break;
+                    case TemplateInstallOutcome.Error:
+                        errors++;
+                        stderr.WriteLine($"  template '{r.TemplateName}' failed: {r.ErrorMessage}");
+                        break;
+                }
+            }
+            anyError |= errors > 0;
+            stdout.WriteLine($"  templates: wrote={wrote} appended={appended} already-present={present} overwrote={overwrote} errors={errors}");
+            if (!opts.AllTemplates && (!wantCursor || !wantWindsurf || !wantCopilot))
+            {
+                stdout.WriteLine("  (run with --all-templates to install rule files for clients not currently detected)");
+            }
+        }
+        else
+        {
+            stdout.WriteLine();
+            stdout.WriteLine("==> templates");
+            stdout.WriteLine("  skipping steering templates (--skip-templates)");
+        }
+
         // ── 4. Vault clone / pull + team registration ──────────────────────
         if (teamYml is not null)
         {
@@ -503,7 +578,10 @@ internal static class InitCommand
         bool SkipPersonas,
         bool SkipTeam,
         bool SkipRegister,
+        bool SkipTemplates,
+        bool AllTemplates,
         bool ForcePersonas,
+        bool ForceTemplates,
         bool AcceptTeamConfig,
         string? ProjectRoot);
 
@@ -511,7 +589,8 @@ internal static class InitCommand
     {
         bool showHelp = false, nonInteractive = false, assumeYes = false;
         bool skipPersonas = false, skipTeam = false, skipRegister = false;
-        bool forcePersonas = false, acceptTeamConfig = false;
+        bool skipTemplates = false, allTemplates = false;
+        bool forcePersonas = false, forceTemplates = false, acceptTeamConfig = false;
         string? projectRoot = null;
         List<string>? clients = null;
 
@@ -534,8 +613,14 @@ internal static class InitCommand
                     skipTeam = true; break;
                 case "--skip-register":
                     skipRegister = true; break;
+                case "--skip-templates":
+                    skipTemplates = true; break;
+                case "--all-templates":
+                    allTemplates = true; break;
                 case "--force-personas":
                     forcePersonas = true; break;
+                case "--force-templates":
+                    forceTemplates = true; break;
                 case "--accept-team-config":
                     acceptTeamConfig = true; break;
 
@@ -577,7 +662,10 @@ internal static class InitCommand
             SkipPersonas: skipPersonas,
             SkipTeam: skipTeam,
             SkipRegister: skipRegister,
+            SkipTemplates: skipTemplates,
+            AllTemplates: allTemplates,
             ForcePersonas: forcePersonas,
+            ForceTemplates: forceTemplates,
             AcceptTeamConfig: acceptTeamConfig,
             ProjectRoot: projectRoot);
         error = null;
@@ -603,9 +691,14 @@ internal static class InitCommand
         w.WriteLine("  3. Writes KOSHI_PROJECT_ROOT (and KOSHI_MEMORY_VAULT if a team-yml is");
         w.WriteLine("     present) into mcpServers.koshi.env.");
         w.WriteLine("  4. Installs personas (.claude/agents/ and ~/.copilot/agents/).");
-        w.WriteLine("  5. If .koshi-team.yml is present: git-clones (or fast-forward-pulls)");
+        w.WriteLine("  5. Drops per-ecosystem steering files into the project root:");
+        w.WriteLine("       AGENTS.md (always), .github/copilot-instructions.md (if Copilot),");
+        w.WriteLine("       .cursorrules (if .cursor/ exists), .windsurfrules (if .windsurf/ exists).");
+        w.WriteLine("     Existing files are preserved (Koshi block is appended only if missing).");
+        w.WriteLine("     Pass --all-templates to install every rule file regardless of detection.");
+        w.WriteLine("  6. If .koshi-team.yml is present: git-clones (or fast-forward-pulls)");
         w.WriteLine("     the declared vault, then registers the declared team.");
-        w.WriteLine("  6. Prints next-steps + verification commands.");
+        w.WriteLine("  7. Prints next-steps + verification commands.");
         w.WriteLine();
         w.WriteLine("FLAGS");
         w.WriteLine("  --client <name>          claude | copilot | all. Repeatable. Defaults to auto-detect.");
@@ -615,7 +708,10 @@ internal static class InitCommand
         w.WriteLine("  --skip-personas          Don't write persona files.");
         w.WriteLine("  --skip-team              Ignore .koshi-team.yml entirely.");
         w.WriteLine("  --skip-register          Don't touch mcpServers.koshi.");
+        w.WriteLine("  --skip-templates         Don't drop AGENTS.md/.cursorrules/.windsurfrules/.github/copilot-instructions.md.");
+        w.WriteLine("  --all-templates          Install every steering file regardless of which clients are detected.");
         w.WriteLine("  --force-personas         Overwrite existing persona files without prompting.");
+        w.WriteLine("  --force-templates        Overwrite existing steering files instead of appending.");
         w.WriteLine("  --accept-team-config     Trust .koshi-team.yml even if vault.path is absolute or");
         w.WriteLine("                           escapes the project root (off by default for safety).");
         w.WriteLine("  -h, --help               Show this help.");

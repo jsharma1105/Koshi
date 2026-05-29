@@ -1,4 +1,5 @@
 # Koshi memory + retrieval discipline
+<!-- koshi-mcp:steering-template:v1 — https://github.com/jsharma1105/Koshi -->
 
 This project uses the [Koshi MCP server](https://github.com/jsharma1105/Koshi)
 for shared memory and BM25 retrieval across the team. To make that

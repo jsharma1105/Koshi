@@ -1,4 +1,5 @@
 # --- Koshi MCP discipline (https://github.com/jsharma1105/Koshi) ---
+# koshi-mcp:steering-template:v1
 
 # This block tells Cursor's agent to use the Koshi MCP server for shared
 # memory and BM25 retrieval, so decisions made in one conversation are

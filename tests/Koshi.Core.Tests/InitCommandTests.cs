@@ -370,6 +370,149 @@ public sealed class InitCommandTests
         }
     }
 
+    [Fact]
+    public void TryParseFlags_recognises_template_flags()
+    {
+        var ok = InitCommand.TryParseFlags(
+            ["--skip-templates", "--force-templates", "--all-templates"], out var opts, out var err);
+        Assert.True(ok);
+        Assert.Null(err);
+        Assert.True(opts.SkipTemplates);
+        Assert.True(opts.ForceTemplates);
+        Assert.True(opts.AllTemplates);
+    }
+
+    [Fact]
+    public void Run_installs_steering_templates_into_project_root()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+
+            var stdout = new StringWriter();
+            // --all-templates forces install of all four regardless of whether
+            // the per-client dotfile directories exist in cwd.
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas", "--all-templates"],
+                stdout, new StringWriter(), new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: new NoopGitRunner());
+
+            Assert.Equal(0, rc);
+            // All four steering files dropped into the project root.
+            Assert.True(File.Exists(Path.Combine(cwd, "AGENTS.md")));
+            Assert.True(File.Exists(Path.Combine(cwd, ".github", "copilot-instructions.md")));
+            Assert.True(File.Exists(Path.Combine(cwd, ".cursorrules")));
+            Assert.True(File.Exists(Path.Combine(cwd, ".windsurfrules")));
+            Assert.Contains("==> templates", stdout.ToString());
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Run_default_only_installs_AGENTS_and_detected_client_template()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+
+            var stdout = new StringWriter();
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas"],
+                stdout, new StringWriter(), new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: new NoopGitRunner());
+
+            Assert.Equal(0, rc);
+            // Universal AGENTS.md → always.
+            Assert.True(File.Exists(Path.Combine(cwd, "AGENTS.md")));
+            // Copilot was the selected client → its rules file is in.
+            Assert.True(File.Exists(Path.Combine(cwd, ".github", "copilot-instructions.md")));
+            // Cursor / Windsurf have no presence in the project → skipped.
+            Assert.False(File.Exists(Path.Combine(cwd, ".cursorrules")));
+            Assert.False(File.Exists(Path.Combine(cwd, ".windsurfrules")));
+            Assert.Contains("--all-templates", stdout.ToString());
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Run_default_installs_cursor_template_when_cursor_dir_present()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+            // Simulate a project that already uses Cursor.
+            Directory.CreateDirectory(Path.Combine(cwd, ".cursor"));
+
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas"],
+                new StringWriter(), new StringWriter(), new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: new NoopGitRunner());
+
+            Assert.Equal(0, rc);
+            Assert.True(File.Exists(Path.Combine(cwd, ".cursorrules")));
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Run_skip_templates_does_not_write_steering_files()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+
+            var stdout = new StringWriter();
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas", "--skip-templates"],
+                stdout, new StringWriter(), new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: new NoopGitRunner());
+
+            Assert.Equal(0, rc);
+            Assert.False(File.Exists(Path.Combine(cwd, "AGENTS.md")));
+            Assert.False(File.Exists(Path.Combine(cwd, ".cursorrules")));
+            Assert.False(File.Exists(Path.Combine(cwd, ".windsurfrules")));
+            Assert.False(File.Exists(Path.Combine(cwd, ".github", "copilot-instructions.md")));
+            Assert.Contains("skipping steering templates", stdout.ToString());
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
     private static string NewTempDir()
     {
         var p = Path.Combine(Path.GetTempPath(), "koshi-init-" + Guid.NewGuid().ToString("N"));

@@ -50,13 +50,34 @@ New-Item -ItemType Directory -Force .github | Out-Null
 Get-Content templates\koshi.copilot-instructions.md | Add-Content .github\copilot-instructions.md
 ```
 
-## How to install (automatic, next)
+## How to install (automatic, with `koshi-mcp init`)
 
-Layer 4 (`#77` Layer 4, tracked as `issue-77-layer4-init-autoinstall`)
-folds this into the `koshi-mcp init` wizard (#68): for each detected
-client, the wizard auto-appends the matching template at install time
-and prints a one-line confirmation. Until that lands, the table above is
-the install matrix.
+As of #77 Layer 4 this is folded into the wizard: running
+`koshi-mcp init` in your project drops every template into its
+canonical path in one pass — `AGENTS.md`,
+`.github/copilot-instructions.md`, `.cursorrules`, and
+`.windsurfrules`. Project-level, not per-client, because the same
+checkout often gets opened by multiple AI clients in parallel.
+
+The installer is **safe by default**:
+
+- **Missing file** → writes the full template.
+- **Existing file *without* the Koshi marker** → appends the template
+  block with a blank-line gap so your existing rules survive verbatim.
+- **Existing file *with* the Koshi marker** → no-op; the install is
+  idempotent.
+- `--force-templates` overwrites instead of appending.
+- `--skip-templates` opts out entirely.
+
+The marker the installer looks for is the literal string
+`koshi-mcp:steering-template:v1`, embedded in every template (the `:v1`
+suffix lets future Koshi versions detect-and-upgrade instead of blindly
+re-appending).
+
+## How to install (manual, fallback)
+
+If you'd rather not run the wizard, use the commands in the previous
+section to paste the relevant template into each rule file by hand.
 
 ## What the templates contain
 
