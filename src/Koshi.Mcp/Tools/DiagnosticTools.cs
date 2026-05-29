@@ -47,6 +47,10 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    File:        {indexStatus.persistencePath ?? "(in-memory only)"}");
         if (indexStatus.loadedFromSnapshot)
             sb.AppendLine($"    Loaded:      from snapshot");
+        if (indexStatus.snapshotDiscardReason is not null)
+            sb.AppendLine($"    Snapshot:    discarded — {indexStatus.snapshotDiscardReason}");
+        if (indexStatus.snapshotLoadWarning is not null)
+            sb.AppendLine($"    Warning:     {indexStatus.snapshotLoadWarning}");
         var namedCorpora = RetrievalTools.GetNamedCorporaStatus();
         if (namedCorpora.Count > 0)
         {
