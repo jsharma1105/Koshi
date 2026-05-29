@@ -405,7 +405,7 @@ class Client:
         """Clear the indexed corpus."""
         return self._tool_call("koshi_clear_index")
 
-    # ─── Memory (5) ─────────────────────────────────────────────────────
+    # ─── Memory (9) ─────────────────────────────────────────────────────
 
     def remember(
         self,
@@ -445,6 +445,96 @@ class Client:
     def clear_memories(self, confirm: bool = False) -> str:
         """Clear ALL stored memories. Pass ``confirm=True`` to actually delete."""
         return self._tool_call("koshi_clear_memories", {"confirm": confirm})
+
+    def capture_turn(
+        self,
+        turn_summary: str,
+        linked_pr: int = 0,
+        linked_commits: str | None = None,
+        auto_promote: bool = True,
+        max_candidates: int = 5,
+        min_confidence: float = 0.5,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> str:
+        """Capture decisions from the current turn into memory.
+
+        Pass a 1-3 paragraph summary of the turn; the server applies
+        deterministic pattern heuristics (no LLM) to extract decision-shape
+        sentences and persists each as a ``Decision`` memory with a provenance
+        footer built from ``linked_pr`` and ``linked_commits``. Set
+        ``auto_promote=False`` to preview candidates without saving.
+        """
+        args: dict[str, Any] = {
+            "turn_summary": turn_summary,
+            "linked_pr": linked_pr,
+            "auto_promote": auto_promote,
+            "max_candidates": max_candidates,
+            "min_confidence": min_confidence,
+        }
+        if linked_commits is not None:
+            args["linked_commits"] = linked_commits
+        if user_id is not None:
+            args["userId"] = user_id
+        if workspace_id is not None:
+            args["workspaceId"] = workspace_id
+        if thread_id is not None:
+            args["threadId"] = thread_id
+        return self._tool_call("koshi_capture_turn", args)
+
+    def memory_export_to_vault(
+        self,
+        vault_path: str,
+        overwrite: bool = False,
+        flavor: str = "obsidian",
+    ) -> str:
+        """Bulk-export current memories as Markdown files into ``vault_path``.
+
+        Defaults to the Obsidian layout (``<vault_path>/koshi/<type>/``)
+        independent of any ``KOSHI_VAULT_FLAVOR`` env var. Override via
+        ``flavor='obsidian'|'foam'|'logseq'|'dendron'``. By default refuses to
+        write into a non-empty vault — pass ``overwrite=True`` to replace
+        existing koshi-tagged files (user notes without ``koshi.id`` are
+        never touched).
+        """
+        return self._tool_call(
+            "koshi_memory_export_to_vault",
+            {
+                "vaultPath": vault_path,
+                "overwrite": overwrite,
+                "flavor": flavor,
+            },
+        )
+
+    def memory_import_from_vault(
+        self,
+        vault_path: str,
+        mode: str = "merge",
+        flavor: str = "obsidian",
+    ) -> str:
+        """Import memories from a Markdown vault into the current backend.
+
+        ``mode='merge'`` (default) keeps the current memory on id collisions;
+        ``'overlay'`` lets the vault win on collisions; ``'replace'`` drops
+        all current memories and takes the vault as-is. ``flavor`` must match
+        the source vault's layout.
+        """
+        return self._tool_call(
+            "koshi_memory_import_from_vault",
+            {
+                "vaultPath": vault_path,
+                "mode": mode,
+                "flavor": flavor,
+            },
+        )
+
+    def memory_sync_vault(self) -> str:
+        """Force a re-scan of the vault backend so external edits / ``git pull`` are picked up.
+
+        No-op when the active memory backend is not a vault.
+        """
+        return self._tool_call("koshi_memory_sync_vault")
 
     # ─── Context (3) ────────────────────────────────────────────────────
 
@@ -566,6 +656,27 @@ class Client:
     def health(self) -> str:
         """Report runtime health: indexed corpus, memory, persistence, uptime."""
         return self._tool_call("koshi_health")
+
+    # ─── Escape hatch ───────────────────────────────────────────────────
+
+    def call_tool(self, name: str, **arguments: Any) -> str:
+        """Invoke any MCP tool advertised by the server by name.
+
+        Use this as a forward-compatibility escape hatch when the server
+        advertises a tool that this Python wrapper does not yet have a
+        dedicated method for. ``name`` is the wire tool name (the
+        ``koshi_`` prefix is added automatically if missing). Keyword
+        arguments are passed through as the tool's ``arguments`` object —
+        callers are responsible for matching the server's expected
+        parameter names (camelCase or snake_case as defined on the C# side).
+
+        Prefer the per-tool methods when available; they document the
+        parameter names and give you static type hints.
+        """
+        if not name:
+            raise ValueError("tool name must not be empty")
+        wire_name = name if name.startswith("koshi_") else f"koshi_{name}"
+        return self._tool_call(wire_name, arguments)
 
 
 if sys.version_info < (3, 10):  # pragma: no cover  # noqa: UP036

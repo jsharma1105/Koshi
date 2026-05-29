@@ -333,6 +333,195 @@ def test_clear_memories_passes_confirm_flag(
     assert tc["params"]["arguments"] == {"confirm": True}
 
 
+def test_capture_turn_omits_optional_args_when_unset(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "✅ Captured 0 decision(s)."}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.capture_turn(turn_summary="Decided to use Postgres for the auth store.")
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_capture_turn"
+    args = tc["params"]["arguments"]
+    assert args == {
+        "turn_summary": "Decided to use Postgres for the auth store.",
+        "linked_pr": 0,
+        "auto_promote": True,
+        "max_candidates": 5,
+        "min_confidence": 0.5,
+    }
+    # None-valued optional args are omitted entirely.
+    assert "linked_commits" not in args
+    assert "userId" not in args
+    assert "workspaceId" not in args
+    assert "threadId" not in args
+
+
+def test_capture_turn_passes_full_argument_set(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "✅ Captured 1 decision(s)."}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.capture_turn(
+            turn_summary="Decision: switch cache to Redis.",
+            linked_pr=1234,
+            linked_commits="abc123,def456",
+            auto_promote=False,
+            max_candidates=10,
+            min_confidence=0.7,
+            user_id="alice",
+            workspace_id="acme",
+            thread_id="thread-7",
+        )
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_capture_turn"
+    # Server-side parameter names are snake_case for the turn fields and
+    # camelCase for the scoping fields; the wire must match exactly.
+    assert tc["params"]["arguments"] == {
+        "turn_summary": "Decision: switch cache to Redis.",
+        "linked_pr": 1234,
+        "linked_commits": "abc123,def456",
+        "auto_promote": False,
+        "max_candidates": 10,
+        "min_confidence": 0.7,
+        "userId": "alice",
+        "workspaceId": "acme",
+        "threadId": "thread-7",
+    }
+
+
+def test_memory_export_to_vault_passes_arguments(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "✅ Exported 7 memories."}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.memory_export_to_vault(
+            vault_path="/tmp/vault", overwrite=True, flavor="foam"
+        )
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_memory_export_to_vault"
+    assert tc["params"]["arguments"] == {
+        "vaultPath": "/tmp/vault",
+        "overwrite": True,
+        "flavor": "foam",
+    }
+
+
+def test_memory_import_from_vault_defaults(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "✅ Imported 3 memories."}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.memory_import_from_vault(vault_path="/tmp/vault")
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_memory_import_from_vault"
+    assert tc["params"]["arguments"] == {
+        "vaultPath": "/tmp/vault",
+        "mode": "merge",
+        "flavor": "obsidian",
+    }
+
+
+def test_memory_sync_vault_passes_no_arguments(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "✅ Reloaded vault."}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.memory_sync_vault()
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_memory_sync_vault"
+    assert tc["params"]["arguments"] == {}
+
+
+def test_call_tool_adds_koshi_prefix_and_forwards_arguments(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "ok"}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.call_tool("search", query="auth", topK=3)
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_search"
+    assert tc["params"]["arguments"] == {"query": "auth", "topK": 3}
+
+
+def test_call_tool_preserves_already_prefixed_name(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    fake = _install_fake_proc(
+        monkeypatch,
+        [
+            _make_initialize_response(),
+            {"result": {"content": [{"type": "text", "text": "ok"}]}},
+        ],
+    )
+    with Client(binary=fake_binary) as c:
+        c.call_tool("koshi_health")
+
+    tc = json.loads(fake.stdin_value().splitlines()[2])
+    assert tc["params"]["name"] == "koshi_health"
+    assert tc["params"]["arguments"] == {}
+
+
+def test_call_tool_rejects_empty_name() -> None:
+    c = Client(binary=Path("/does/not/exist"))
+    with pytest.raises(ValueError, match="tool name must not be empty"):
+        c.call_tool("")
+
+
+def test_all_four_previously_missing_tools_are_exposed() -> None:
+    """Regression guard for #76 — these four wrappers must remain on Client."""
+    required = (
+        "capture_turn",
+        "memory_export_to_vault",
+        "memory_import_from_vault",
+        "memory_sync_vault",
+    )
+    for name in required:
+        assert hasattr(Client, name), f"Client.{name} missing — see #76"
+        assert callable(getattr(Client, name)), f"Client.{name} is not callable"
+
+
 # ─── Integration tests against a real koshi-mcp binary ──────────────────────
 
 
