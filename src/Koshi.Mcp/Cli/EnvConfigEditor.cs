@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -86,10 +87,9 @@ internal static class EnvConfigEditor
         var all = new Dictionary<string, string>(StringComparer.Ordinal);
         if (env is not null)
         {
-            foreach (var kvp in env)
+            foreach (var kvp in env.Where(static k => k.Value is not null))
             {
-                if (kvp.Value is not JsonNode v) continue;
-                all[kvp.Key] = v.ToString();
+                all[kvp.Key] = kvp.Value!.ToString();
             }
         }
         return new EnvEditResult(EnvEditOutcome.Read, path, AllValues: all);

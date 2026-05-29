@@ -614,14 +614,24 @@ public sealed class ConfigCommandTests
 
         public void Dispose()
         {
-            // Best-effort cleanup. Swallow IO errors only — temp-dir teardown
-            // failures in tests are diagnostic noise, not real failures.
-            try { if (Directory.Exists(Home)) Directory.Delete(Home, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            try { if (Directory.Exists(AppData)) Directory.Delete(AppData, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDeleteDirectory(Home);
+            TryDeleteDirectory(AppData);
+        }
+
+        private static void TryDeleteDirectory(string path)
+        {
+            if (!Directory.Exists(path)) return;
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup: temp-dir teardown failures in tests are
+                // diagnostic noise (typically a stray file handle on Windows),
+                // not real failures. Trace so it shows up under debug listeners.
+                System.Diagnostics.Trace.WriteLine($"Sandbox cleanup failed for '{path}': {ex.Message}");
+            }
         }
     }
 }
