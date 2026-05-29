@@ -64,6 +64,12 @@ Koshi is a learning + production tool. Use it to:
 
 ## Quick Start (60 seconds)
 
+> ℹ️ "60 seconds" covers the package install. End-to-end setup
+> (install + register with your MCP client + install personas + index
+> your project) is currently 6–8 steps;
+> [#74](https://github.com/jsharma1105/Koshi/issues/74) tracks the work
+> to consolidate it into one command.
+
 Pick one of three install paths:
 
 ### Option A — Python users (`pip install koshi`)
@@ -553,8 +559,10 @@ contains sensitive material.
 | Per-team quality scoring | ✅ | ❌ | ❌ | ❌ |
 | Works offline (no keys) | ✅ | ✅ | ✅ | ❌ |
 | MIT licensed, single binary | ✅ | ✅ | ✅ | ❌ |
-| Setup time | ~60 sec | ~60 sec | ~60 sec | hours |
+| Setup time[^setup] | ~60 sec | ~60 sec | ~60 sec | hours |
 | Cost | free | free | free | $$$ |
+
+[^setup]: Covers the package install itself. End-to-end (install + register with your MCP client + install personas + index your project) is currently 6–8 steps; [#74](https://github.com/jsharma1105/Koshi/issues/74) tracks consolidating it into one command.
 
 ---
 

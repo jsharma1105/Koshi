@@ -34,6 +34,11 @@ The vault backend supports four file-layout flavors via `KOSHI_VAULT_FLAVOR=obsi
 
 ## 60-second install
 
+> ℹ️ The 60-second framing covers the package install itself. End-to-end
+> setup (install + register with your MCP client + install personas + index
+> your project) is currently 6–8 steps; [#74](https://github.com/jsharma1105/Koshi/issues/74)
+> tracks the work to consolidate it into one command.
+
 Pick the path that matches your stack:
 
 ### Python — `pip install koshi`
@@ -215,8 +220,9 @@ full format spec and migration guide.
 - 🛠️ [`Koshi.Core`](src/Koshi.Core/) — The underlying library you can embed in
   your own .NET agents/services.
 - 🤖 [`Koshi.Agents`](src/Koshi.Agents/) — Five Koshi-aware sub-agent personas
-  (architect, retriever, memory-keeper, context-packer, quality-scorer) installable
-  into Claude Code and GitHub Copilot CLI with one command.
+  (`koshi-librarian`, `koshi-memory-keeper`, `koshi-context-packer`,
+  `koshi-quality-coach`, `koshi-orchestrator`) installable into Claude Code
+  and GitHub Copilot CLI with one command.
 
 ➡️ **Most people want the MCP server. See [`src/Koshi.Mcp/README.md`](src/Koshi.Mcp/README.md).**
 
@@ -251,7 +257,7 @@ For Python-package development, see [`CONTRIBUTING.md`](CONTRIBUTING.md#python-p
 - [**Python quickstart**](docs/python-quickstart.md) — pip install, first 20 lines of code, all 24 tools indexed.
 - [**MCP server reference**](src/Koshi.Mcp/README.md) — every tool, every argument, every client snippet.
 - [**Vault mode**](docs/vault-mode.md) — share memories across teams via a Git-backed Markdown vault (`KOSHI_MEMORY_VAULT`).
-- [**Sub-agent personas**](AGENTS.md) — librarian, memory-keeper, context-packer, quality-coach, orchestrator.
+- [**Sub-agent personas**](AGENTS.md) — `koshi-librarian`, `koshi-memory-keeper`, `koshi-context-packer`, `koshi-quality-coach`, `koshi-orchestrator`.
 - [**Security policy**](SECURITY.md) — what's in scope, what's not, how to report.
 - [**Changelog**](CHANGELOG.md) — every release, every change.
 - [**Engineering notes**](docs/context-memory-harness-engineering.md) — the design of memory + retrieval + context + telemetry.
