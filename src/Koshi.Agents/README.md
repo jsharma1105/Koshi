@@ -72,7 +72,7 @@ Each persona ships in **two formats**:
 ## What this is not
 
 - Not a copy-paste guide. Use `koshi-agents install` instead.
-- Not a config editor. We *read* `settings.json` / `mcp_config.json`; we don't rewrite them.
+- Not a config editor. We *read* `settings.json` / `mcp-config.json`; we don't rewrite them.
 - Not telemetry. Nothing in this tool phones home.
 
 ## License
