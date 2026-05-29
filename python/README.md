@@ -64,6 +64,15 @@ Every method returns the formatted text response from the MCP server. The full K
 
 ## Environment variables
 
+The Python wrapper just spawns `koshi-mcp` as a subprocess, so **every
+server-side env var works the same** — see the
+[full configuration reference](https://github.com/jsharma1105/Koshi/blob/main/src/Koshi.Mcp/README.md#configuration)
+for all 11 vars (`KOSHI_PROJECT_ROOT`, `KOSHI_MEMORY_VAULT`,
+`KOSHI_VAULT_FLAVOR`, `KOSHI_VAULT_WATCH`, `KOSHI_TOKENIZER_MODEL`,
+`KOSHI_CHUNK_*`, `KOSHI_BM25_STEMMING`, and the four below).
+
+The four that matter most for the Python wrapper specifically:
+
 | Var | Effect |
 |---|---|
 | `KOSHI_BIN` | Path to a `koshi-mcp` binary. Skips auto-download, overrides PATH lookup. Version still verified at spawn time. |
