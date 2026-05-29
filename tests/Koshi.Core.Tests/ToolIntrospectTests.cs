@@ -96,7 +96,7 @@ public sealed class ToolIntrospectTests
             {
                 "teamId", "retrievedChunks", "memoriesRecalled",
                 "budgetUtilization", "cacheRatio", "latencyMs",
-                "userRating", "issues", "tokensUsed",
+                "userRating", "issues", "tokensUsed", "format",
             },
             paramNames);
 
@@ -117,6 +117,15 @@ public sealed class ToolIntrospectTests
         // (not the string "null"). Disambiguates from a literal "null"
         // string default at the JSON layer.
         Assert.Null(issues.DefaultValue);
+
+        // The structured-output #66 format parameter is optional and string-typed.
+        // FriendlyTypeName returns "string" for both string and string? — Nullable<T>
+        // applies only to value types — so consumers disambiguate via the `required`
+        // flag and `default_value` (null here = optional with literal null default).
+        var format = tool.Parameters.Single(p => p.Name == "format");
+        Assert.False(format.Required);
+        Assert.Equal("string", format.Type);
+        Assert.Null(format.DefaultValue);
     }
 
     [Fact]
@@ -305,7 +314,7 @@ public sealed class ToolIntrospectTests
         Assert.Equal("TeamTools", obj["class_name"]!.GetValue<string>());
 
         var parameters = obj["parameters"]!.AsArray();
-        Assert.Equal(9, parameters.Count);
+        Assert.Equal(10, parameters.Count);
 
         var teamId = parameters[0]!.AsObject();
         Assert.Equal("teamId", teamId["name"]!.GetValue<string>());
