@@ -49,9 +49,11 @@ internal static class McpConfigWriter
 
     public static McpRegisterResult RegisterKoshi(
         PersonaClient client,
-        bool dryRun)
+        bool dryRun,
+        string? homeDir = null,
+        string? appDataDir = null)
     {
-        var configPath = ClientResolver.McpConfigFile(client);
+        var configPath = ClientResolver.McpConfigFile(client, homeDir, appDataDir);
 
         try
         {

@@ -12,7 +12,7 @@ var version = Assembly.GetExecutingAssembly()
     ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
     ?? "0.0.0";
 
-// Handle `--version` / `--help` / `config ...` BEFORE starting the MCP host.
+// Handle `--version` / `--help` / `config ...` / `init ...` BEFORE starting the MCP host.
 // The server's normal mode is to speak JSON-RPC over stdio forever, so
 // without this dispatch `koshi-mcp --version` would hang waiting for a client
 // to send an `initialize` request. Keep the parser deliberately tiny and
@@ -20,6 +20,11 @@ var version = Assembly.GetExecutingAssembly()
 if (args.Length > 0 && string.Equals(args[0], "config", StringComparison.Ordinal))
 {
     return ConfigCommand.Run(args[1..], Console.Out, Console.Error);
+}
+
+if (args.Length > 0 && string.Equals(args[0], "init", StringComparison.Ordinal))
+{
+    return InitCommand.Run(args[1..], Console.Out, Console.Error, Console.In);
 }
 
 // Offline tool introspection (#67). Handled before the MCP host so the
@@ -48,6 +53,8 @@ foreach (var arg in args)
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  koshi-mcp                    Run the MCP server on stdio (default).");
+            Console.WriteLine("  koshi-mcp init               Wire a fresh project for Koshi in one command.");
+            Console.WriteLine("                               Run 'koshi-mcp init --help' for flags.");
             Console.WriteLine("  koshi-mcp config <op>        Inspect/edit mcpServers.koshi.env per client.");
             Console.WriteLine("                               Run 'koshi-mcp config --help' for details.");
             Console.WriteLine("  koshi-mcp --list-tools       List every MCP tool this server exposes.");
