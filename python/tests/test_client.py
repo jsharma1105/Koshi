@@ -12,6 +12,7 @@ import pytest
 
 from koshi import Client, IncompatibleBinaryError, ToolError
 from koshi._manifest import VERSION
+from koshi.client import _is_compatible_version
 
 
 class _FakeProc:
@@ -224,10 +225,73 @@ def test_is_error_flag_also_raises_tool_error(
 def test_version_mismatch_raises_incompatible(
     monkeypatch: pytest.MonkeyPatch, fake_binary: Path
 ) -> None:
+    # 0.3.0 vs VERSION 0.4.1 → different minor → incompatible.
     _install_fake_proc(monkeypatch, [_make_initialize_response(server_version="0.3.0")])
 
-    with pytest.raises(IncompatibleBinaryError, match=r"0\.3\.0"), Client(binary=fake_binary):
+    with pytest.raises(IncompatibleBinaryError) as excinfo, Client(binary=fake_binary):
         pass
+
+    msg = str(excinfo.value)
+    # Names both versions.
+    assert "0.3.0" in msg
+    assert VERSION in msg
+    # Names the resolution source (constructor arg).
+    assert "binary=" in msg
+    # Gives concrete remediation steps.
+    assert "dotnet tool update" in msg
+    assert "pip install --upgrade koshi" in msg
+
+
+def test_version_patch_drift_is_accepted_with_warning(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path
+) -> None:
+    # Same major.minor as VERSION (0.4.1) but patch differs.
+    drifted = "0.4.0"
+    assert drifted != VERSION
+    _install_fake_proc(monkeypatch, [_make_initialize_response(server_version=drifted)])
+
+    captured: list[str] = []
+    with Client(binary=fake_binary, log_handler=captured.append) as c:
+        assert c.server_version == drifted
+
+    # Compatibility warning routed to log_handler.
+    assert any(drifted in line and VERSION in line for line in captured), captured
+
+
+def test_version_patch_drift_warning_falls_back_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_binary: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    drifted = "0.4.2"
+    assert drifted != VERSION
+    _install_fake_proc(monkeypatch, [_make_initialize_response(server_version=drifted)])
+
+    with Client(binary=fake_binary) as c:
+        assert c.server_version == drifted
+
+    err = capsys.readouterr().err
+    assert drifted in err
+    assert VERSION in err
+
+
+def test_version_mismatch_via_env_mentions_koshi_bin(
+    monkeypatch: pytest.MonkeyPatch, fake_binary: Path, tmp_path: Path
+) -> None:
+    # KOSHI_BIN set (fake_binary fixture does this) but no binary= arg → message
+    # should call out KOSHI_BIN as the resolution source.
+    _install_fake_proc(monkeypatch, [_make_initialize_response(server_version="0.3.0")])
+
+    # Patch resolve_binary so we don't actually try to download / find on PATH;
+    # we want the env-source branch, which means no explicit binary= arg.
+    monkeypatch.setattr("koshi.client.resolve_binary", lambda: fake_binary)
+
+    with pytest.raises(IncompatibleBinaryError) as excinfo, Client():
+        pass
+
+    msg = str(excinfo.value)
+    assert "KOSHI_BIN" in msg
+    assert "0.3.0" in msg
 
 
 def test_version_with_git_sha_suffix_is_accepted(
@@ -272,9 +336,44 @@ def test_clear_memories_passes_confirm_flag(
 # ─── Integration tests against a real koshi-mcp binary ──────────────────────
 
 
+def _skip_if_real_binary_incompatible(real_binary: Path) -> None:
+    """Skip the @slow integration tests when the installed binary's major.minor
+    does not match the dev-checkout ``_manifest.py`` VERSION (e.g. running
+    against a globally-installed Koshi.Mcp from a source tree where VERSION
+    is the un-injected dev placeholder).
+    """
+    import subprocess as _sp
+
+    try:
+        proc = _sp.run(
+            [str(real_binary), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, _sp.TimeoutExpired) as e:
+        pytest.skip(f"Could not query {real_binary} --version: {e}")
+    out = (proc.stdout or "") + (proc.stderr or "")
+    # Best-effort version extraction: look for the first X.Y.Z token.
+    import re as _re
+
+    m = _re.search(r"\b(\d+\.\d+\.\d+)\b", out)
+    if m is None:
+        return  # binary doesn't expose --version cleanly; let the test proceed
+    binary_version = m.group(1)
+    if not _is_compatible_version(binary_version, VERSION):
+        pytest.skip(
+            f"installed koshi-mcp is {binary_version} but this checkout's "
+            f"_manifest.py VERSION is {VERSION}; run "
+            f"`python scripts/inject-manifest.py` or install matching versions"
+        )
+
+
 @pytest.mark.slow
 def test_real_binary_version_round_trip(real_binary: Path) -> None:
     """End-to-end: spawn the actual binary and ask for version. Verifies AOT wiring."""
+    _skip_if_real_binary_incompatible(real_binary)
     with Client(binary=real_binary) as c:
         out = c.version()
         assert "Koshi" in out
@@ -283,6 +382,7 @@ def test_real_binary_version_round_trip(real_binary: Path) -> None:
 @pytest.mark.slow
 def test_real_binary_remember_recall_round_trip(real_binary: Path) -> None:
     """Memory round-trip: writes a fact, reads it back, then forgets it."""
+    _skip_if_real_binary_incompatible(real_binary)
     with Client(binary=real_binary) as c:
         c.remember(content="The pytest secret is rosebud", subject="test-fixture")
         recall_output = c.recall("rosebud")

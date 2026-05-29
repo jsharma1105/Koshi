@@ -12,15 +12,19 @@ class BinaryNotFoundError(KoshiError):
 
 
 class IncompatibleBinaryError(KoshiError):
-    """The resolved binary's version does not match this koshi package.
+    """The resolved binary's version is not wire-compatible with this package.
 
-    Raised when:
-      * KOSHI_BIN points to a binary whose `serverInfo.version` differs from
-        koshi.__version__.
-      * A binary found on PATH (e.g. an old `dotnet tool install` of
-        Koshi.Mcp) has a mismatched version.
+    Raised when the koshi-mcp ``serverInfo.version`` reported during MCP
+    ``initialize`` differs from :data:`koshi.__version__` in either major
+    or minor component. Patch drift (e.g. server ``0.8.0`` vs client
+    ``0.8.1``) is treated as wire-compatible and surfaces as a warning to
+    ``log_handler`` / stderr rather than raising.
 
-    The Python package and the koshi-mcp binary version must match exactly.
+    Common triggers:
+      * KOSHI_BIN points to a binary whose ``serverInfo.version`` differs
+        in major.minor from ``koshi.__version__``.
+      * A binary found on PATH (e.g. an old ``dotnet tool install`` of
+        Koshi.Mcp) has a mismatched major.minor.
     """
 
 
