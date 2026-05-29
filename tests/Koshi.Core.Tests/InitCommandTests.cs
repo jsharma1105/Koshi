@@ -513,6 +513,143 @@ public sealed class InitCommandTests
         }
     }
 
+    [Fact]
+    public void TryParseFlags_recognises_git_template_flags()
+    {
+        var ok = InitCommand.TryParseFlags(
+            ["--register-git-template", "--force-git-template"], out var opts, out var err);
+        Assert.True(ok);
+        Assert.Null(err);
+        Assert.True(opts.RegisterGitTemplate);
+        Assert.True(opts.ForceGitTemplate);
+    }
+
+    [Fact]
+    public void TryParseFlags_force_git_template_implies_register()
+    {
+        // --force-git-template alone should imply --register-git-template;
+        // otherwise the flag has no effect.
+        var ok = InitCommand.TryParseFlags(
+            ["--force-git-template"], out var opts, out _);
+        Assert.True(ok);
+        Assert.True(opts.RegisterGitTemplate);
+        Assert.True(opts.ForceGitTemplate);
+    }
+
+    [Fact]
+    public void Run_without_register_git_template_does_not_touch_home()
+    {
+        // The default flow MUST be inert for the per-machine git template:
+        // we mutate ~/.gitconfig only when the user opts in.
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas", "--skip-templates"],
+                stdout, stderr, new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: new NoopGitRunner());
+
+            Assert.Equal(0, rc);
+            Assert.False(Directory.Exists(Path.Combine(home, ".git-template-koshi")));
+            Assert.DoesNotContain("==> git template", stdout.ToString());
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Run_register_git_template_installs_dir_hook_and_sets_config()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+            var fakeGit = new GitClientTests.FakeGitRunner();
+            // init.templatedir starts unset (`git config --get` exits 1).
+            fakeGit.OnArgs(("config", "--global", "--get", "init.templatedir"),
+                new GitResult(1, string.Empty, string.Empty));
+
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas",
+                 "--skip-templates", "--register-git-template"],
+                stdout, stderr, new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: fakeGit);
+
+            Assert.Equal(0, rc);
+            var templateDir = Path.Combine(home, ".git-template-koshi");
+            Assert.True(Directory.Exists(templateDir));
+            Assert.True(File.Exists(Path.Combine(templateDir, "hooks", "post-checkout")));
+            Assert.True(File.Exists(Path.Combine(templateDir, "koshi-templates", "AGENTS.md")));
+            Assert.True(File.Exists(Path.Combine(templateDir, "koshi-templates", ".cursorrules")));
+            Assert.True(File.Exists(Path.Combine(templateDir, "koshi-templates", ".windsurfrules")));
+            Assert.True(File.Exists(Path.Combine(templateDir, "koshi-templates", ".github", "copilot-instructions.md")));
+            Assert.Contains("git template: installed", stdout.ToString());
+
+            // git config --global init.templatedir <path> should have been called.
+            Assert.Contains(fakeGit.Calls, c =>
+                c.Args.Length >= 4 && c.Args[0] == "config" && c.Args[1] == "--global"
+                && c.Args[2] == "init.templatedir");
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Run_register_git_template_refuses_existing_templatedir_without_force()
+    {
+        var home = NewTempDir();
+        var appData = NewTempDir();
+        var cwd = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(cwd, ".git"));
+            var fakeGit = new GitClientTests.FakeGitRunner();
+            // init.templatedir already set to a different path → conflict.
+            fakeGit.OnArgs(("config", "--global", "--get", "init.templatedir"),
+                new GitResult(0, "/some/other/template" + Environment.NewLine, string.Empty));
+
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            var rc = InitCommand.Run(
+                ["--client", "copilot", "--skip-team", "--skip-personas",
+                 "--skip-templates", "--register-git-template"],
+                stdout, stderr, new StringReader(""),
+                homeDir: home, appDataDir: appData, cwd: cwd,
+                gitRunner: fakeGit);
+
+            Assert.Equal(1, rc);
+            Assert.Contains("init.templatedir is already set", stderr.ToString());
+            Assert.Contains("--force-git-template", stderr.ToString());
+            // We should NOT have written the dir on a conflict abort.
+            Assert.False(Directory.Exists(Path.Combine(home, ".git-template-koshi")));
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+            Directory.Delete(appData, recursive: true);
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
     private static string NewTempDir()
     {
         var p = Path.Combine(Path.GetTempPath(), "koshi-init-" + Guid.NewGuid().ToString("N"));

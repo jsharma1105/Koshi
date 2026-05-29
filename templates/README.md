@@ -74,6 +74,60 @@ The marker the installer looks for is the literal string
 suffix lets future Koshi versions detect-and-upgrade instead of blindly
 re-appending).
 
+## Auto-install on every `git clone` (opt-in, per-machine — #78 Gap C)
+
+You can also tell git itself to drop these files into every freshly
+cloned repository. Run **once per machine**:
+
+```bash
+koshi-mcp init --register-git-template
+```
+
+What it does:
+
+1. Writes `~/.git-template-koshi/` containing a copy of the four
+   steering files plus a `hooks/post-checkout` POSIX shell hook.
+2. Runs `git config --global init.templatedir ~/.git-template-koshi` so
+   every future `git clone` seeds `.git/` from that directory.
+3. The hook fires the *first* time HEAD is checked out after the clone
+   and copies any of the four steering files into the working tree
+   **only if they are not already present** — so a repo that already
+   ships its own `.cursorrules` keeps it.
+
+Honest limits — surfaced via `koshi-mcp init --help` too:
+
+- **`git init` does not fire the hook.** Git has no `init` hook and
+  `init.templatedir` only seeds `.git/`, not the working tree. For
+  fresh projects, just run `koshi-mcp init` from inside the repo.
+- **Bare clones and `git clone --no-checkout`** never run
+  `post-checkout` either.
+- **`git worktree add` also fires the hook.** This is intentional — a
+  linked worktree of an existing project deserves the same steering
+  surface as a fresh clone of the same project. Files already present
+  in the worktree (because they live in the parent repo) are skipped.
+- **Submodules are skipped on purpose** — the parent repo already owns
+  the steering layout.
+- **A global `core.hooksPath`** (some monorepo / corporate setups)
+  overrides per-repo hooks; if you've set that, our hook never fires.
+  The installer detects this and prints a warning.
+- **Symlinked destinations are refused for safety.** If the cloned
+  working tree contains `.github -> ..` or `AGENTS.md -> /etc/passwd`
+  (dangling), the hook skips that file rather than write through the
+  symlink.
+- **Existing `init.templatedir`** is treated as a conflict and we
+  refuse to overwrite it unless you also pass `--force-git-template`.
+
+Why opt-in: it mutates your global gitconfig and writes to your home
+directory. That's a per-machine choice, not a per-project one. The
+default `koshi-mcp init` is and stays a no-op on `~/.gitconfig`.
+
+To uninstall manually:
+
+```bash
+git config --global --unset init.templatedir
+rm -rf ~/.git-template-koshi
+```
+
 ## How to install (manual, fallback)
 
 If you'd rather not run the wizard, use the commands in the previous
