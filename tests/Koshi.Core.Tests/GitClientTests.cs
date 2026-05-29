@@ -179,6 +179,8 @@ public sealed class GitClientTests
             => _scripted[Key(args.Item1, args.Item2, args.Item3)] = result;
         public void OnArgs((string, string) args, GitResult result)
             => _scripted[Key(args.Item1, args.Item2)] = result;
+        public void OnArgs((string, string, string, string) args, GitResult result)
+            => _scripted[Key(args.Item1, args.Item2, args.Item3, args.Item4)] = result;
 
         public GitResult Run(string workingDir, params string[] args)
         {
