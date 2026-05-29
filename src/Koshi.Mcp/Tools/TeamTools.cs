@@ -3,6 +3,7 @@ using Koshi.Core.Harness;
 using Koshi.Core.Team;
 using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
+using static Koshi.Mcp.Internal.JsonShapes;
 
 namespace Koshi.Mcp.Tools;
 
@@ -149,7 +150,8 @@ public sealed class TeamTools
         "WHAT IT DOES: Computes a composite quality score across retrieval / efficiency / cache / " +
         "latency / user-rating dimensions; appends to the team's score and metrics history (persisted).\n" +
         "WHAT YOU GIVE IT: teamId (required); retrievedChunks; memoriesRecalled; budgetUtilization " +
-        "(0-1); cacheRatio (0-1); latencyMs; userRating (1-5, 0 = no rating); optional metric tags.")]
+        "(0-1); cacheRatio (0-1); latencyMs; userRating (1-5, 0 = no rating); optional metric tags. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
     public static string ScoreTurn(
         [Description("Team ID to score for")] string teamId,
         [Description("Number of retrieved chunks used")] int retrievedChunks = 0,
@@ -161,8 +163,17 @@ public sealed class TeamTools
         [Description("Issues: irrelevant,incomplete,hallucinated,verbose,terse,format,outdated,slow (comma-separated)")]
         string? issues = null,
         [Description("Total input tokens for the turn (0 = derive from budgetUtilization x team's ContextBudgetTokens)")]
-        int tokensUsed = 0)
+        int tokensUsed = 0,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<ScoreTurnResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeScoreTurnResultData)
+                : "❌ " + fmtErr;
+
         var teamProfile = _registry.GetTeam(teamId);
         int inputTokens = tokensUsed > 0
             ? tokensUsed
@@ -184,10 +195,10 @@ public sealed class TeamTools
             LlmLatency = TimeSpan.FromMilliseconds(latencyMs * 0.8),
         };
 
+        var issueFlags = ParseIssues(issues);
         QualityFeedback? feedback = null;
         if (userRating > 0)
         {
-            var issueFlags = ParseIssues(issues);
             feedback = new QualityFeedback
             {
                 SessionId = "mcp-session",
@@ -202,6 +213,32 @@ public sealed class TeamTools
         QualityScore score = teamProfile is not null
             ? _loop.ProcessTurn(teamId, metrics, feedback)
             : _scorer.Score(metrics, feedback);
+
+        if (fmt == OutputFormat.Json)
+        {
+            var breakdown = new ScoreBreakdownData(
+                Retrieval: score.RetrievalScore,
+                Efficiency: score.EfficiencyScore,
+                Cache: score.CacheScore,
+                Latency: score.LatencyScore,
+                User: score.UserScore);
+            var target = teamProfile is not null
+                ? new ScoreTargetData(teamProfile.Config.QualityTarget, score.MeetsTarget(teamProfile.Config.QualityTarget))
+                : new ScoreTargetData(null, null);
+            var parsedIssues = IssueFlagsToList(issueFlags);
+            var warning = PersistenceWarning();
+            var payload = new ScoreTurnResultData(
+                TeamId: teamId,
+                TeamRegistered: teamProfile is not null,
+                Composite: score.Composite,
+                Grade: score.Grade.ToString(),
+                Breakdown: breakdown,
+                Target: target,
+                IssuesParsed: parsedIssues,
+                PersistenceWarning: warning is null ? null : OutputFormatting.StripTextDecorations(warning));
+            return OutputFormatting.Ok(payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeScoreTurnResultData);
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Quality Score: {score.Grade} ({score.Composite:F2}) ═══\n");
@@ -220,6 +257,21 @@ public sealed class TeamTools
         }
 
         return AppendWarning(sb.ToString(), PersistenceWarning());
+    }
+
+    private static List<string> IssueFlagsToList(FeedbackIssue flags)
+    {
+        var list = new List<string>();
+        if (flags == FeedbackIssue.None) return list;
+        if ((flags & FeedbackIssue.Irrelevant) != 0) list.Add("irrelevant");
+        if ((flags & FeedbackIssue.Incomplete) != 0) list.Add("incomplete");
+        if ((flags & FeedbackIssue.Hallucinated) != 0) list.Add("hallucinated");
+        if ((flags & FeedbackIssue.TooVerbose) != 0) list.Add("verbose");
+        if ((flags & FeedbackIssue.TooTerse) != 0) list.Add("terse");
+        if ((flags & FeedbackIssue.WrongFormat) != 0) list.Add("format");
+        if ((flags & FeedbackIssue.Outdated) != 0) list.Add("outdated");
+        if ((flags & FeedbackIssue.SlowResponse) != 0) list.Add("slow");
+        return list;
     }
 
     [McpServerTool(Name = "koshi_team_dashboard"), Description(

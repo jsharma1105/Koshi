@@ -8,6 +8,7 @@ using Koshi.Core.Tokenization;
 using Koshi.Mcp.Internal;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using static Koshi.Mcp.Internal.JsonShapes;
 
 namespace Koshi.Mcp.Tools;
 
@@ -369,15 +370,21 @@ public sealed class RetrievalTools
         "WHAT IT DOES: BM25 keyword search over the indexed corpus. Auto-loads from KOSHI_INDEX_FILE " +
         "if a snapshot exists; auto-indexes KOSHI_INDEX_PATH once on first use if neither is loaded.\n" +
         "WHAT YOU GIVE IT: query (required); topK (1-50, default 5); corpus (optional — see " +
-        "koshi_list_indexed for names).")]
+        "koshi_list_indexed for names). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string Search(
         [Description("The search query")] string query,
         [Description("Number of results to return (1-50, default: 5)")] int topK = 5,
         [Description("Optional named corpus to search. Defaults to 'default'. Use koshi_list_indexed() to see available corpora.")]
-        string? corpus = null)
+        string? corpus = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return SearchError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(query))
-            return "❌ Query must not be empty.";
+            return SearchError(fmt, OutputErrorCodes.EmptyQuery, "Query must not be empty.");
 
         topK = Math.Clamp(topK < 1 ? 5 : topK, 1, MaxTopK);
 
@@ -388,12 +395,13 @@ public sealed class RetrievalTools
         if (!IsDefaultCorpus(corpusName))
         {
             if (!_extraCorpora.TryGetValue(corpusName, out var named))
-                return $"❌ Unknown corpus '{corpusName}'. Call koshi_list_indexed() to see available corpora.";
+                return SearchError(fmt, OutputErrorCodes.UnknownCorpus,
+                    $"Unknown corpus '{corpusName}'. Call koshi_list_indexed() to see available corpora.");
 
             var namedResults = named.Retriever
                 .SearchAsync(query, new RetrievalOptions(TopK: topK))
                 .GetAwaiter().GetResult();
-            return FormatSearchResults(query, namedResults, corpusName);
+            return FormatSearchResults(fmt, query, namedResults, corpusName);
         }
 
         EnsureCorpusLoaded();
@@ -408,8 +416,9 @@ public sealed class RetrievalTools
             // surprise scan on the first search call.
             if (!PathConfig.Default.IndexPathFromEnv)
             {
-                return "❌ No documents indexed. Call koshi_index_directory(path) first, " +
-                       "or set the KOSHI_INDEX_PATH / KOSHI_INDEX_FILE environment variable in your MCP client config.";
+                return SearchError(fmt, OutputErrorCodes.NoIndex,
+                    "No documents indexed. Call koshi_index_directory(path) first, " +
+                    "or set the KOSHI_INDEX_PATH / KOSHI_INDEX_FILE environment variable in your MCP client config.");
             }
 
             var envPath = PathConfig.Default.IndexPath;
@@ -423,9 +432,15 @@ public sealed class RetrievalTools
             if (_lastAutoIndexFailureMessage is not null && sinceLastAttempt < AutoIndexRetryAfter)
             {
                 var retryIn = AutoIndexRetryAfter - sinceLastAttempt;
-                return _lastAutoIndexFailureMessage +
+                var textMsg = _lastAutoIndexFailureMessage +
                        $"\n(next auto-retry in {Math.Max(1, (int)Math.Ceiling(retryIn.TotalSeconds))}s; " +
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
+                if (fmt == OutputFormat.Json)
+                    return OutputFormatting.Error<SearchResultData>(
+                        OutputErrorCodes.AutoIndexFailed,
+                        OutputFormatting.StripTextDecorations(textMsg),
+                        KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+                return textMsg;
             }
 
             _lastAutoIndexAttempt = now;
@@ -439,9 +454,15 @@ public sealed class RetrievalTools
             {
                 var failureMsg = "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
                 _lastAutoIndexFailureMessage = failureMsg;
-                return failureMsg +
+                var withRetry = failureMsg +
                        $"\n(next auto-retry in {AutoIndexRetryAfter.TotalSeconds:F0}s; " +
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
+                if (fmt == OutputFormat.Json)
+                    return OutputFormatting.Error<SearchResultData>(
+                        OutputErrorCodes.AutoIndexFailed,
+                        OutputFormatting.StripTextDecorations(withRetry),
+                        KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+                return withRetry;
             }
 
             // Success: clear the failure cache so subsequent re-clears + retries start fresh.
@@ -452,18 +473,44 @@ public sealed class RetrievalTools
         lock (_lock)
         {
             if (!_isIndexed || _keywordRetriever is null)
-                return "❌ No documents indexed. Call koshi_index_directory or koshi_index first.";
+                return SearchError(fmt, OutputErrorCodes.NoIndex,
+                    "No documents indexed. Call koshi_index_directory or koshi_index first.");
             retriever = _keywordRetriever;
         }
 
         var options = new RetrievalOptions(TopK: topK);
         var results = retriever.SearchAsync(query, options).GetAwaiter().GetResult();
 
-        return FormatSearchResults(query, results, DefaultCorpusName);
+        return FormatSearchResults(fmt, query, results, DefaultCorpusName);
     }
 
-    private static string FormatSearchResults(string query, IReadOnlyList<SearchResult> results, string corpusName)
+    private static string SearchError(OutputFormat fmt, string code, string message)
+        => fmt == OutputFormat.Json
+            ? OutputFormatting.Error<SearchResultData>(code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData)
+            : "❌ " + message;
+
+    private static string FormatSearchResults(
+        OutputFormat fmt, string query, IReadOnlyList<SearchResult> results, string corpusName)
     {
+        if (fmt == OutputFormat.Json)
+        {
+            var hits = new List<SearchHitData>(results.Count);
+            for (int i = 0; i < results.Count; i++)
+            {
+                var r = results[i];
+                hits.Add(new SearchHitData(
+                    Rank: i + 1,
+                    Score: r.Score,
+                    Source: r.Chunk.Metadata.Source,
+                    ChunkId: r.Chunk.Id,
+                    Content: r.Chunk.Content));
+            }
+            var payload = new SearchResultData(query, corpusName, results.Count, hits);
+            return OutputFormatting.Ok(payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeSearchResultData);
+        }
+
         if (results.Count == 0)
             return $"No results found for: \"{query}\" [corpus={corpusName}]";
 

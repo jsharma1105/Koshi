@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Reflection;
 using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
+using static Koshi.Mcp.Internal.JsonShapes;
 
 namespace Koshi.Mcp.Tools;
 
@@ -33,12 +34,27 @@ public sealed class DiagnosticTools
         "do not survive restart, the team dashboard shows zeros, or the user reports persistence issues. " +
         "Always preferable to guessing whether persistence is wired correctly.\n" +
         "WHAT IT DOES: Reports indexed corpus size, memory store backend + persistence path, team " +
-        "registry state, snapshot-load status, and uptime. Read-only; never mutates state.")]
-    public static string Health()
+        "registry state, snapshot-load status, and uptime. Read-only; never mutates state. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
+    public static string Health(
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<HealthResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeHealthResultData)
+                : "❌ " + fmtErr;
+
         var indexStatus = RetrievalTools.GetStatus();
         var memStatus = MemoryTools.GetStatus();
         var teamsStatus = TeamTools.GetStatus();
+
+        if (fmt == OutputFormat.Json)
+        {
+            return BuildHealthJson(indexStatus, memStatus, teamsStatus);
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Koshi Health (v{_version.Value}) ═══\n");
@@ -137,6 +153,107 @@ public sealed class DiagnosticTools
         sb.AppendLine($"  GC working set: {Environment.WorkingSet / (1024 * 1024)} MB");
 
         return sb.ToString();
+    }
+
+    private static string BuildHealthJson(
+        (int chunkCount, int sourceCount, string? path, bool indexed,
+         bool persistenceEnabled, string? persistencePath, bool loadedFromSnapshot,
+         string? snapshotDiscardReason, string? snapshotLoadWarning,
+         int loadedChunkCount, DateTimeOffset? loadedAt) indexStatus,
+        MemoryStatus memStatus,
+        TeamsStatus teamsStatus)
+    {
+        var retrievalPersistence = new PersistenceData(
+            Enabled: indexStatus.persistenceEnabled,
+            Path: indexStatus.persistencePath,
+            LoadAttempted: indexStatus.persistenceEnabled,
+            LoadSucceeded: indexStatus.loadedFromSnapshot,
+            LoadDiscardReason: indexStatus.snapshotDiscardReason,
+            LoadedCount: indexStatus.loadedChunkCount,
+            LoadedAt: indexStatus.loadedAt,
+            FileOnDisk: DescribeFileOnDisk(indexStatus.persistencePath));
+
+        var namedCorporaList = new List<NamedCorpusData>();
+        foreach (var nc in RetrievalTools.GetNamedCorporaStatus())
+            namedCorporaList.Add(new NamedCorpusData(nc.name, nc.chunks, nc.sources, nc.path));
+
+        var retrieval = new HealthRetrievalData(
+            Indexed: indexStatus.indexed,
+            ChunkCount: indexStatus.chunkCount,
+            SourceCount: indexStatus.sourceCount,
+            Path: indexStatus.path,
+            Persistence: retrievalPersistence,
+            SnapshotLoadWarning: indexStatus.snapshotLoadWarning,
+            NamedCorpora: namedCorporaList);
+
+        var memPersistence = new PersistenceData(
+            Enabled: memStatus.PersistenceEnabled,
+            Path: memStatus.Path,
+            LoadAttempted: memStatus.LoadAttempted,
+            LoadSucceeded: memStatus.LoadAttempted && memStatus.LoadedAt is not null,
+            LoadDiscardReason: null,
+            LoadedCount: memStatus.LoadedRecordCount,
+            LoadedAt: memStatus.LoadedAt,
+            FileOnDisk: DescribeFileOnDisk(memStatus.Path));
+
+        var memory = new HealthMemoryData(
+            RecordCount: memStatus.Count,
+            Backend: memStatus.BackendKind,
+            Persistence: memPersistence,
+            UnmanagedNoteCount: memStatus.BackendKind == "vault" ? memStatus.UnmanagedNoteCount : null,
+            DuplicateIdWarningCount: memStatus.BackendKind == "vault" ? memStatus.DuplicateIdWarningCount : null,
+            VaultWatcherStatus: memStatus.BackendKind == "vault" ? memStatus.VaultWatcherStatus : null,
+            VaultFlavor: memStatus.BackendKind == "vault" ? memStatus.VaultFlavor : null);
+
+        var teamsPersistence = new PersistenceData(
+            Enabled: teamsStatus.PersistenceEnabled,
+            Path: teamsStatus.Path,
+            LoadAttempted: teamsStatus.LoadAttempted,
+            LoadSucceeded: teamsStatus.LoadAttempted && teamsStatus.LoadedAt is not null && teamsStatus.LastLoadError is null,
+            LoadDiscardReason: teamsStatus.LastLoadError,
+            LoadedCount: teamsStatus.LoadedTeamCount + teamsStatus.LoadedScoreCount + teamsStatus.LoadedFeedbackCount,
+            LoadedAt: teamsStatus.LoadedAt,
+            FileOnDisk: DescribeFileOnDisk(teamsStatus.Path));
+
+        var teams = new HealthTeamsData(
+            TeamCount: teamsStatus.TeamCount,
+            ScoreCount: teamsStatus.ScoreCount,
+            FeedbackCount: teamsStatus.FeedbackCount,
+            Backend: "json",
+            Persistence: teamsPersistence,
+            LastSave: teamsStatus.LastSaveError is null ? "ok" : "failed: " + teamsStatus.LastSaveError);
+
+        var paths = PathConfig.Default;
+        var embedProvider = Koshi.Core.Retrieval.EmbeddingProviderRegistry.Current;
+        var configuration = new HealthConfigurationData(
+            ProjectRoot: paths.ProjectRoot,
+            ProjectRootFromEnv: paths.ProjectRootFromEnv,
+            IndexPath: paths.IndexPath,
+            IndexPathFromEnv: paths.IndexPathFromEnv,
+            AutoIndexEnabled: paths.IndexPathFromEnv,
+            IndexFile: paths.IndexFile,
+            IndexFileFromEnv: paths.IndexFileFromEnv,
+            MemoryFile: paths.MemoryFile,
+            MemoryFileFromEnv: paths.MemoryFileFromEnv,
+            MemoryVault: paths.MemoryVault,
+            MemoryVaultFromEnv: paths.MemoryVaultFromEnv,
+            TeamsFile: paths.TeamsFile,
+            TeamsFileFromEnv: paths.TeamsFileFromEnv,
+            TokenizerModel: Koshi.Core.Tokenization.TokenCounters.ModelName,
+            EmbeddingProvider: embedProvider?.ModelName,
+            EmbeddingDimensions: embedProvider?.Dimensions);
+
+        var payload = new HealthResultData(
+            Version: _version.Value,
+            Uptime: DateTimeOffset.UtcNow - _startedAt,
+            WorkingSetMb: Environment.WorkingSet / (1024 * 1024),
+            Retrieval: retrieval,
+            Memory: memory,
+            Teams: teams,
+            Configuration: configuration);
+
+        return OutputFormatting.Ok(payload,
+            KoshiOutputJsonContext.Default.JsonEnvelopeHealthResultData);
     }
 
     /// <summary>

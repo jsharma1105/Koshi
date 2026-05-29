@@ -5,6 +5,7 @@ using Koshi.Core.Models;
 using Koshi.Core.Retrieval;
 using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
+using static Koshi.Mcp.Internal.JsonShapes;
 
 namespace Koshi.Mcp.Tools;
 
@@ -174,7 +175,8 @@ public sealed class MemoryTools
         "WHAT IT DOES: BM25-keyword search across stored memories blended with recency and confidence. " +
         "Globally-scoped memories (UserId='*') are always returned regardless of the userId filter.\n" +
         "WHAT YOU GIVE IT: query (required); type filter (Fact|Decision|Pattern|Preference|All); " +
-        "topK 1-25; scope filters (userId/workspaceId/threadId — empty = no filter).")]
+        "topK 1-25; scope filters (userId/workspaceId/threadId — empty = no filter). Pass format=\"json\" " +
+        "for a parseable envelope (#66).")]
     public static string Recall(
         [Description("Topic or query to search memories for")] string query,
         [Description("Filter by type: Fact, Decision, Pattern, Preference, or All")] string type = "All",
@@ -184,10 +186,16 @@ public sealed class MemoryTools
         [Description("Optional workspace filter. Empty = no workspace filter.")]
         string? workspaceId = null,
         [Description("Optional thread filter. Empty = no thread filter.")]
-        string? threadId = null)
+        string? threadId = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return RecallError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(query))
-            return "❌ Query must not be empty.";
+            return RecallError(fmt, OutputErrorCodes.EmptyQuery, "Query must not be empty.");
 
         topK = Math.Clamp(topK < 1 ? 5 : topK, 1, MaxRecallTopK);
 
@@ -196,7 +204,8 @@ public sealed class MemoryTools
             List<MemoryRecord> candidates = [.. memories];
 
             if (candidates.Count == 0)
-                return "No memories stored yet. Use koshi_remember to store facts.";
+                return RecallEmpty(fmt, query, type,
+                    "No memories stored yet. Use koshi_remember to store facts.");
 
             if (!string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)
                 && Enum.TryParse<MemoryType>(type, true, out var mt))
@@ -214,8 +223,10 @@ public sealed class MemoryTools
 
             if (candidates.Count == 0)
                 return hasScopeFilter
-                    ? $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}')."
-                    : $"No memories of type '{type}'.";
+                    ? RecallEmpty(fmt, query, type,
+                        $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}').")
+                    : RecallEmpty(fmt, query, type,
+                        $"No memories of type '{type}'.");
 
             var bm25Scores = ComputeBm25Scores(query, candidates);
             double maxBm25 = bm25Scores.Count > 0 ? bm25Scores.Values.Max() : 0.0;
@@ -239,7 +250,29 @@ public sealed class MemoryTools
                 .ToList();
 
             if (scored.Count == 0)
-                return $"No memories found matching '{query}'.";
+                return RecallEmpty(fmt, query, type,
+                    $"No memories found matching '{query}'.");
+
+            if (fmt == OutputFormat.Json)
+            {
+                var jsonMemories = new List<RecalledMemoryData>(scored.Count);
+                foreach (var (mem, score, _) in scored)
+                {
+                    jsonMemories.Add(new RecalledMemoryData(
+                        Id: mem.Id,
+                        Type: mem.Type.ToString(),
+                        Subject: mem.Subject,
+                        Content: mem.Content,
+                        Score: score,
+                        Confidence: mem.Confidence,
+                        Scope: new ScopeData(mem.Scope.UserId, mem.Scope.WorkspaceId, mem.Scope.ThreadId),
+                        Source: mem.Source,
+                        CreatedAt: mem.CreatedAt));
+                }
+                var payload = new RecallResultData(query, type, scored.Count, jsonMemories);
+                return OutputFormatting.Ok(payload,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
+            }
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"═══ Recalled {scored.Count} memories for: \"{query}\" ═══\n");
@@ -260,6 +293,23 @@ public sealed class MemoryTools
             return sb.ToString();
         });
     }
+
+    private static string RecallEmpty(OutputFormat fmt, string query, string type, string textMessage)
+    {
+        if (fmt == OutputFormat.Json)
+        {
+            var payload = new RecallResultData(query, type, 0, []);
+            return OutputFormatting.Ok(payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
+        }
+        return "❌ " + textMessage;
+    }
+
+    private static string RecallError(OutputFormat fmt, string code, string message)
+        => fmt == OutputFormat.Json
+            ? OutputFormatting.Error<RecallResultData>(code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData)
+            : "❌ " + message;
 
     /// <summary>
     /// Returns true when the memory's scope is visible to the caller's filter.

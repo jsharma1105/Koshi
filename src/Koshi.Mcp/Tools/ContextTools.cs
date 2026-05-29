@@ -4,6 +4,7 @@ using Koshi.Core.Models;
 using Koshi.Core.Tokenization;
 using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
+using static Koshi.Mcp.Internal.JsonShapes;
 
 namespace Koshi.Mcp.Tools;
 
@@ -25,7 +26,8 @@ public sealed class ContextTools
         "tokenBudget using a cache-first strategy by default. Deterministic. No LLM, no network.\n" +
         "WHAT YOU GIVE IT: systemPrompt + userQuery (required); retrievedContent (sections joined with " +
         "'\\n---\\n'); memories (JSON array, or raw koshi_recall output — auto-parsed); teamContext; " +
-        "tokenBudget (default 8192); strategy (CacheOptimized|PrimacyRecency|RelevanceDescending|Chronological).")]
+        "tokenBudget (default 8192); strategy (CacheOptimized|PrimacyRecency|RelevanceDescending|Chronological). " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
     public static string CompileContext(
         [Description("System prompt for the LLM")] string systemPrompt,
         [Description("The user's query")] string userQuery,
@@ -37,8 +39,17 @@ public sealed class ContextTools
         [Description("Team context/conventions to include (stable, cacheable)")] string? teamContext = null,
         [Description("Total token budget (default: 8192)")] int tokenBudget = 8192,
         [Description("Positioning strategy: CacheOptimized, PrimacyRecency, RelevanceDescending, Chronological")]
-        string strategy = "CacheOptimized")
+        string strategy = "CacheOptimized",
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<CompileContextResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeCompileContextResultData)
+                : "❌ " + fmtErr;
+
         if (tokenBudget < 1) tokenBudget = 8192;
         var tokenCounter = TokenCounters.Shared;
         var posStrategy = Enum.TryParse<PositioningStrategy>(strategy, true, out var ps)
@@ -95,6 +106,31 @@ public sealed class ContextTools
         };
 
         var result = compiler.Compile(request);
+
+        if (fmt == OutputFormat.Json)
+        {
+            var sections = new List<CompileSectionData>(result.Sections.Count);
+            foreach (var section in result.Sections)
+            {
+                sections.Add(new CompileSectionData(
+                    Role: section.Role.ToString(),
+                    Id: section.Id,
+                    TokenCount: section.TokenCount,
+                    Content: section.Content));
+            }
+            var metrics = new CompileMetricsData(
+                TotalTokensUsed: result.Metrics.TotalTokensUsed,
+                TokenBudgetAvailable: result.Metrics.TokenBudgetAvailable,
+                BudgetUtilization: result.Metrics.BudgetUtilization,
+                SectionsIncluded: result.Metrics.SectionsIncluded,
+                SectionsDropped: result.Metrics.SectionsDropped,
+                Strategy: posStrategy.ToString(),
+                CacheableTokens: result.Metrics.CacheableTokens,
+                CacheRatio: result.Metrics.CacheRatio);
+            var payload = new CompileContextResultData(metrics, sections);
+            return OutputFormatting.Ok(payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeCompileContextResultData);
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Compiled Context ═══");
