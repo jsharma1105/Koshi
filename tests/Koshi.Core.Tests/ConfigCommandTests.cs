@@ -370,7 +370,7 @@ public sealed class ConfigCommandTests
         using var sandbox = new Sandbox();
         sandbox.WriteCopilotConfig(@"{ ""mcpServers"": { ""koshi"": { ""command"": ""koshi-mcp"", ""env"": { ""FOO"": ""bar"" } } } }");
 
-        var (stdout, stderr, code) = RunInSandbox(sandbox, "get", "FOO", "--client", "copilot");
+        var (stdout, _, code) = RunInSandbox(sandbox, "get", "FOO", "--client", "copilot");
         Assert.Equal(0, code);
         Assert.Equal($"bar{Environment.NewLine}", stdout);
     }
@@ -456,7 +456,7 @@ public sealed class ConfigCommandTests
         using var sandbox = new Sandbox();
         sandbox.WriteCopilotConfig(@"{ ""mcpServers"": { ""koshi"": { ""command"": ""koshi-mcp"", ""env"": {} } } }");
 
-        var envFile = Path.Combine(sandbox.Home, ".env");
+        var envFile = Path.Join(sandbox.Home, ".env");
         File.WriteAllText(envFile, "FOO=bar\nBAZ=\"quoted value\"\n# comment\n");
 
         var (_, _, code) = RunInSandbox(sandbox, "apply", envFile, "--client", "copilot");
@@ -473,7 +473,7 @@ public sealed class ConfigCommandTests
         using var sandbox = new Sandbox();
         sandbox.WriteCopilotConfig(@"{ ""mcpServers"": { ""koshi"": { ""command"": ""koshi-mcp"", ""env"": {} } } }");
 
-        var envFile = Path.Combine(sandbox.Home, ".env");
+        var envFile = Path.Join(sandbox.Home, ".env");
         File.WriteAllText(envFile, "GOOD=ok\nBAD line without equals\n");
 
         var (_, stderr, code) = RunInSandbox(sandbox, "apply", envFile, "--client", "copilot");
@@ -614,8 +614,14 @@ public sealed class ConfigCommandTests
 
         public void Dispose()
         {
-            try { if (Directory.Exists(Home)) Directory.Delete(Home, recursive: true); } catch { }
-            try { if (Directory.Exists(AppData)) Directory.Delete(AppData, recursive: true); } catch { }
+            // Best-effort cleanup. Swallow IO errors only — temp-dir teardown
+            // failures in tests are diagnostic noise, not real failures.
+            try { if (Directory.Exists(Home)) Directory.Delete(Home, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            try { if (Directory.Exists(AppData)) Directory.Delete(AppData, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 }

@@ -65,7 +65,7 @@ internal static class EnvConfigEditor
     public static EnvEditResult Get(string client, string key, string? homeDir = null, string? appDataDir = null)
     {
         var path = McpClientPaths.Resolve(client, homeDir, appDataDir);
-        var (root, koshi, parseErr) = LoadAndLocateKoshi(path);
+        var (_, koshi, parseErr) = LoadAndLocateKoshi(path);
         if (parseErr is not null) return parseErr with { ConfigPath = path };
 
         var env = koshi!["env"] as JsonObject;
@@ -79,7 +79,7 @@ internal static class EnvConfigEditor
     public static EnvEditResult GetAll(string client, string? homeDir = null, string? appDataDir = null)
     {
         var path = McpClientPaths.Resolve(client, homeDir, appDataDir);
-        var (root, koshi, parseErr) = LoadAndLocateKoshi(path);
+        var (_, koshi, parseErr) = LoadAndLocateKoshi(path);
         if (parseErr is not null) return parseErr with { ConfigPath = path };
 
         var env = koshi!["env"] as JsonObject;
@@ -88,8 +88,8 @@ internal static class EnvConfigEditor
         {
             foreach (var kvp in env)
             {
-                if (kvp.Value is JsonNode v)
-                    all[kvp.Key] = v.ToString();
+                if (kvp.Value is not JsonNode v) continue;
+                all[kvp.Key] = v.ToString();
             }
         }
         return new EnvEditResult(EnvEditOutcome.Read, path, AllValues: all);
