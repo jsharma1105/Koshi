@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -38,6 +39,82 @@ from .errors import (
 __all__ = ["Client"]
 
 _LogHandler = Callable[[str], None]
+
+
+def _parse_version(v: str) -> tuple[int, int, int] | None:
+    """Best-effort parse of ``X.Y.Z[-pre][+meta]`` into ``(major, minor, patch)``.
+
+    Returns ``None`` if the input does not look like a semver-ish string we
+    can compare. We deliberately do not depend on ``packaging.version`` so
+    the package stays stdlib-only.
+    """
+    if not v:
+        return None
+    core = v.split("+", 1)[0].split("-", 1)[0]
+    parts = core.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+        patch = int(parts[2]) if len(parts) >= 3 else 0
+    except ValueError:
+        return None
+    return major, minor, patch
+
+
+def _is_compatible_version(server: str, client: str) -> bool:
+    """True iff ``server`` and ``client`` share the same major and minor.
+
+    Patch drift is treated as wire-compatible; any major or minor difference
+    is treated as potentially MCP-surface-breaking and rejected.
+    """
+    s = _parse_version(server)
+    c = _parse_version(client)
+    if s is None or c is None:
+        return False
+    return s[0] == c[0] and s[1] == c[1]
+
+
+def _format_incompatible_message(
+    *,
+    server_version: str,
+    client_version: str,
+    binary_path: Path | None,
+    explicit_via_arg: bool,
+    explicit_via_env: bool,
+) -> str:
+    """Return a multi-line, actionable ``IncompatibleBinaryError`` message."""
+    if explicit_via_arg:
+        source = "the `binary=` argument passed to Client()"
+    elif explicit_via_env:
+        env_value = os.environ.get("KOSHI_BIN", "")
+        source = f"KOSHI_BIN={env_value!r}"
+    else:
+        source = "auto-resolution (versioned cache / PATH / GitHub release download)"
+
+    server_core = server_version.split("+", 1)[0]
+    lines = [
+        f"koshi-mcp at {binary_path} reports version '{server_version}', but the "
+        f"koshi Python package is {client_version} and requires the same major.minor "
+        f"(got {server_core}, expected {client_version}).",
+        "",
+        f"Binary was resolved via: {source}.",
+        "",
+        "Fix one of the following:",
+        f"  • Upgrade the binary:    dotnet tool update --global Koshi.Mcp --version {client_version}",
+        f"  • Downgrade the Python:  pip install --upgrade koshi=={server_core}",
+    ]
+    if explicit_via_env:
+        lines.append(
+            "  • Or unset KOSHI_BIN so koshi can auto-download the matching binary"
+        )
+    elif not explicit_via_arg:
+        lines.append(
+            "  • Or remove the stale `dotnet tool install` from PATH so koshi can "
+            "auto-download the matching version"
+        )
+    return "\n".join(lines)
 
 
 class Client:
@@ -132,13 +209,37 @@ class Client:
         self._server_version = version_core
 
         if version_core and version_core != VERSION:
-            self.close()
-            raise IncompatibleBinaryError(
-                f"Resolved koshi-mcp binary reports version '{raw_version}', "
-                f"but Python koshi {VERSION} requires an exact-version match. "
-                f"Either upgrade koshi-mcp to {VERSION}, downgrade `pip install koshi=={version_core}`, "
-                f"unset KOSHI_BIN, or remove the stale `dotnet tool install` of Koshi.Mcp from PATH."
-            )
+            if _is_compatible_version(version_core, VERSION):
+                # Same major.minor; only patch (or pre-release tag) differs.
+                # Treat as wire-compatible. Surface a one-line warning so
+                # the drift is visible without crashing the session.
+                msg = (
+                    f"koshi: server version {version_core} differs from client "
+                    f"{VERSION} (same major.minor — wire-compatible). "
+                    f"Consider aligning them."
+                )
+                if self._log_handler is not None:
+                    with contextlib.suppress(Exception):
+                        self._log_handler(msg)
+                else:
+                    sys.stderr.write(msg + "\n")
+            else:
+                # Major or minor differs; MCP surface may have changed. Fail
+                # loud with a message that names both versions, the resolved
+                # binary path, and concrete remediation steps.
+                binary_path = self._binary
+                explicit_via_arg = self._binary_arg is not None
+                explicit_via_env = "KOSHI_BIN" in os.environ
+                self.close()
+                raise IncompatibleBinaryError(
+                    _format_incompatible_message(
+                        server_version=raw_version,
+                        client_version=VERSION,
+                        binary_path=binary_path,
+                        explicit_via_arg=explicit_via_arg,
+                        explicit_via_env=explicit_via_env,
+                    )
+                )
 
         self._notify("notifications/initialized")
 
