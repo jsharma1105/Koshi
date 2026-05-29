@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Koshi.Mcp.Cli;
 using Koshi.Mcp.Tools;
 using ModelContextProtocol.Server;
 
@@ -10,11 +11,16 @@ var version = Assembly.GetExecutingAssembly()
     ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
     ?? "0.0.0";
 
-// Handle `--version` / `--help` BEFORE starting the MCP host. The server's
-// normal mode is to speak JSON-RPC over stdio forever, so without this
-// dispatch `koshi-mcp --version` would hang waiting for a client to send
-// an `initialize` request. Keep the parser deliberately tiny and AOT-safe:
-// string comparison only, no reflection, no third-party arg library.
+// Handle `--version` / `--help` / `config ...` BEFORE starting the MCP host.
+// The server's normal mode is to speak JSON-RPC over stdio forever, so
+// without this dispatch `koshi-mcp --version` would hang waiting for a client
+// to send an `initialize` request. Keep the parser deliberately tiny and
+// AOT-safe: string comparison only, no reflection, no third-party arg library.
+if (args.Length > 0 && string.Equals(args[0], "config", StringComparison.Ordinal))
+{
+    return ConfigCommand.Run(args[1..], Console.Out, Console.Error);
+}
+
 foreach (var arg in args)
 {
     switch (arg)
@@ -33,6 +39,8 @@ foreach (var arg in args)
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  koshi-mcp                Run the MCP server on stdio (default).");
+            Console.WriteLine("  koshi-mcp config <op>    Inspect/edit mcpServers.koshi.env per client.");
+            Console.WriteLine("                           Run 'koshi-mcp config --help' for details.");
             Console.WriteLine("  koshi-mcp --version, -v  Print the version and exit.");
             Console.WriteLine("  koshi-mcp --help, -h     Print this help and exit.");
             Console.WriteLine();
