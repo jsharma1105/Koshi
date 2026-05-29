@@ -111,7 +111,11 @@ public static class OutputFormatting
             {
                 _envDefault = OutputFormat.Text;
                 _envWarning = $"[koshi] ignoring invalid {FormatEnvVar}='{raw}'; expected 'text' or 'json'. Falling back to text.";
-                try { Console.Error.WriteLine(_envWarning); } catch { /* never throw from resolve */ }
+                // Best-effort warning. Console.Error may be redirected/closed (e.g. detached
+                // stdio in some MCP hosts) — IOException must not propagate from Resolve().
+                try { Console.Error.WriteLine(_envWarning); }
+                catch (IOException) { /* stderr unavailable — swallow */ }
+                catch (ObjectDisposedException) { /* stderr disposed — swallow */ }
             }
 
             return _envDefault;
