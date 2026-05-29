@@ -776,7 +776,10 @@ public sealed class MemoryTools
                 UnmanagedNoteCount: backend.UnmanagedNoteCount,
                 DuplicateIdWarningCount: backend.DuplicateIdWarningCount,
                 VaultWatcherStatus: vault?.WatcherStatus,
-                VaultFlavor: vault?.Layout.FlavorName);
+                VaultFlavor: vault?.Layout.FlavorName,
+                LoadAttempted: _store.LoadAttempted,
+                LoadedRecordCount: _store.LoadedRecordCount,
+                LoadedAt: _store.LoadedAt);
         });
     }
 }
@@ -789,4 +792,7 @@ internal sealed record MemoryStatus(
     int UnmanagedNoteCount,
     int DuplicateIdWarningCount,
     string? VaultWatcherStatus,
-    string? VaultFlavor);
+    string? VaultFlavor,
+    bool LoadAttempted,
+    int LoadedRecordCount,
+    DateTimeOffset? LoadedAt);

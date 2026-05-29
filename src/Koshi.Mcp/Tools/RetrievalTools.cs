@@ -62,6 +62,12 @@ public sealed class RetrievalTools
     // output so the user can sanity-check that they're searching what they
     // expect to be searching.
     private static string? _snapshotLoadWarning;
+    // Snapshot-load telemetry surfaced by koshi_health (#70). Captured ONCE
+    // at the moment the snapshot is loaded into the corpus; subsequent
+    // koshi_index_directory calls do not mutate these — they describe the
+    // load-on-startup answer, not the live chunk count.
+    private static int _loadedChunkCount;
+    private static DateTimeOffset? _loadedAt;
 
     // Named-corpus registry (issue #23). The default corpus is intentionally
     // NOT a key here — it lives in the legacy single-corpus fields above so
@@ -116,6 +122,8 @@ public sealed class RetrievalTools
             _loadedFromSnapshot = false;
             _snapshotDiscardReason = null;
             _snapshotLoadWarning = null;
+            _loadedChunkCount = 0;
+            _loadedAt = null;
             _lastAutoIndexAttempt = DateTimeOffset.MinValue;
             _lastAutoIndexFailureMessage = null;
         }
@@ -552,6 +560,8 @@ public sealed class RetrievalTools
             _loadedFromSnapshot = false;
             _snapshotDiscardReason = null;
             _snapshotLoadWarning = null;
+            _loadedChunkCount = 0;
+            _loadedAt = null;
             // Reset auto-index retry throttle so the next koshi_search can
             // re-attempt KOSHI_INDEX_PATH immediately (#31).
             _lastAutoIndexAttempt = DateTimeOffset.MinValue;
@@ -574,7 +584,8 @@ public sealed class RetrievalTools
     internal static (
         int chunkCount, int sourceCount, string? path, bool indexed,
         bool persistenceEnabled, string? persistencePath, bool loadedFromSnapshot,
-        string? snapshotDiscardReason, string? snapshotLoadWarning) GetStatus()
+        string? snapshotDiscardReason, string? snapshotLoadWarning,
+        int loadedChunkCount, DateTimeOffset? loadedAt) GetStatus()
     {
         EnsureCorpusLoaded();
         lock (_lock)
@@ -584,7 +595,8 @@ public sealed class RetrievalTools
                 : _indexedChunks.GroupBy(c => c.Metadata.Source).Count();
             return (_indexedChunks.Count, sourceCount, _indexedFromPath, _isIndexed,
                     _persistence.IsEnabled, _persistence.Path, _loadedFromSnapshot,
-                    _snapshotDiscardReason, _snapshotLoadWarning);
+                    _snapshotDiscardReason, _snapshotLoadWarning,
+                    _loadedChunkCount, _loadedAt);
         }
     }
 
@@ -656,6 +668,8 @@ public sealed class RetrievalTools
             _loadedFromSnapshot = true;
             _snapshotDiscardReason = null;
             _snapshotLoadWarning = warning;
+            _loadedChunkCount = envelope.Chunks.Count;
+            _loadedAt = DateTimeOffset.UtcNow;
             // Snapshot satisfied the indexed-state requirement; clear any
             // prior auto-index failure cache so the throttle starts fresh
             // if a future koshi_clear_index + retry is needed (#31).
@@ -793,6 +807,8 @@ public sealed class RetrievalTools
             _loadedFromSnapshot = false;
             _snapshotDiscardReason = null;
             _snapshotLoadWarning = null;
+            _loadedChunkCount = 0;
+            _loadedAt = null;
             // ReplaceIndex was called explicitly — clear any prior auto-index
             // failure cache so a future clear + retry isn't blocked by stale
             // throttle state (#31).

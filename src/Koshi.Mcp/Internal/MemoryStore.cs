@@ -15,11 +15,25 @@ internal sealed class MemoryStore
     private List<MemoryRecord> _memories;
     private int _nextId;
 
+    // Snapshot-load telemetry for koshi_health (#70). Captured ONCE in the
+    // constructor; subsequent vault-watcher reloads or ForceReload calls do
+    // not update these — they describe the load-on-startup answer.
+    public int LoadedRecordCount { get; }
+    public DateTimeOffset? LoadedAt { get; }
+    public bool LoadAttempted { get; }
+
     public MemoryStore(IMemoryBackend backend)
     {
         _backend = backend;
         _memories = backend.LoadAll();
         RecomputeNextId();
+
+        LoadAttempted = backend.IsEnabled;
+        if (LoadAttempted)
+        {
+            LoadedRecordCount = _memories.Count;
+            LoadedAt = DateTimeOffset.UtcNow;
+        }
     }
 
     public IMemoryBackend Backend => _backend;

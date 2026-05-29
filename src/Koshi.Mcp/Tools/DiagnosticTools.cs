@@ -48,12 +48,17 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    Chunks:      {indexStatus.chunkCount}");
         sb.AppendLine($"    Sources:     {indexStatus.sourceCount}");
         sb.AppendLine($"    Path:        {indexStatus.path ?? "(none)"}");
-        sb.AppendLine($"    Persistence: {(indexStatus.persistenceEnabled ? "enabled" : "disabled")}");
-        sb.AppendLine($"    File:        {indexStatus.persistencePath ?? "(in-memory only)"}");
-        if (indexStatus.loadedFromSnapshot)
-            sb.AppendLine($"    Loaded:      from snapshot");
-        if (indexStatus.snapshotDiscardReason is not null)
-            sb.AppendLine($"    Snapshot:    discarded — {indexStatus.snapshotDiscardReason}");
+        AppendPersistenceBlock(
+            sb,
+            persistenceEnabled: indexStatus.persistenceEnabled,
+            persistencePath: indexStatus.persistencePath,
+            loadAttempted: indexStatus.persistenceEnabled,
+            loadSucceeded: indexStatus.loadedFromSnapshot,
+            loadDiscardReason: indexStatus.snapshotDiscardReason,
+            loadedCount: indexStatus.loadedChunkCount,
+            loadedAt: indexStatus.loadedAt,
+            loadedNoun: "chunks",
+            diskNoun: "Snapshot on disk");
         if (indexStatus.snapshotLoadWarning is not null)
             sb.AppendLine($"    Warning:     {indexStatus.snapshotLoadWarning}");
         var namedCorpora = RetrievalTools.GetNamedCorporaStatus();
@@ -68,8 +73,20 @@ public sealed class DiagnosticTools
         sb.AppendLine("  Memory:");
         sb.AppendLine($"    Records:     {memStatus.Count}");
         sb.AppendLine($"    Backend:     {memStatus.BackendKind}");
-        sb.AppendLine($"    Persistence: {(memStatus.PersistenceEnabled ? "enabled" : "disabled")}");
-        sb.AppendLine($"    Location:    {memStatus.Path ?? "(in-memory only)"}");
+        AppendPersistenceBlock(
+            sb,
+            persistenceEnabled: memStatus.PersistenceEnabled,
+            persistencePath: memStatus.Path,
+            loadAttempted: memStatus.LoadAttempted,
+            // JSON-backend load "succeeds" even when the file does not yet exist
+            // (zero records, persistence on); surface that as load-attempted=yes,
+            // loadedAt=set, loadedCount=0 so the user sees "loaded 0 records".
+            loadSucceeded: memStatus.LoadAttempted && memStatus.LoadedAt is not null,
+            loadDiscardReason: null,
+            loadedCount: memStatus.LoadedRecordCount,
+            loadedAt: memStatus.LoadedAt,
+            loadedNoun: "records",
+            diskNoun: "File on disk");
         if (memStatus.BackendKind == "vault")
         {
             sb.AppendLine($"    Unmanaged:   {memStatus.UnmanagedNoteCount}");
@@ -84,9 +101,17 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    Scores:      {teamsStatus.ScoreCount}");
         sb.AppendLine($"    Feedback:    {teamsStatus.FeedbackCount}");
         sb.AppendLine($"    Backend:     json");
-        sb.AppendLine($"    Persistence: {(teamsStatus.PersistenceEnabled ? "enabled" : "disabled")}");
-        sb.AppendLine($"    Location:    {teamsStatus.Path ?? "(in-memory only)"}");
-        sb.AppendLine($"    Last load:   {(teamsStatus.LastLoadError is null ? "ok" : "failed: " + teamsStatus.LastLoadError)}");
+        AppendPersistenceBlock(
+            sb,
+            persistenceEnabled: teamsStatus.PersistenceEnabled,
+            persistencePath: teamsStatus.Path,
+            loadAttempted: teamsStatus.LoadAttempted,
+            loadSucceeded: teamsStatus.LoadAttempted && teamsStatus.LoadedAt is not null && teamsStatus.LastLoadError is null,
+            loadDiscardReason: teamsStatus.LastLoadError,
+            loadedCount: teamsStatus.LoadedTeamCount + teamsStatus.LoadedScoreCount + teamsStatus.LoadedFeedbackCount,
+            loadedAt: teamsStatus.LoadedAt,
+            loadedNoun: $"items ({teamsStatus.LoadedTeamCount} teams, {teamsStatus.LoadedScoreCount} scores, {teamsStatus.LoadedFeedbackCount} feedback)",
+            diskNoun: "File on disk");
         sb.AppendLine($"    Last save:   {(teamsStatus.LastSaveError is null ? "ok" : "failed: " + teamsStatus.LastSaveError)}");
         sb.AppendLine();
 
@@ -112,6 +137,88 @@ public sealed class DiagnosticTools
         sb.AppendLine($"  GC working set: {Environment.WorkingSet / (1024 * 1024)} MB");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Emit the per-section <c>Persistence</c> sub-block introduced by #70:
+    /// three lines covering save-on-shutdown, load-on-startup (with count +
+    /// timestamp when applicable), and on-disk file size + last-modified.
+    /// Replaces the old single-line <c>Persistence: enabled / File:</c> pair
+    /// that was ambiguous about whether a snapshot had actually loaded.
+    /// </summary>
+    internal static void AppendPersistenceBlock(
+        System.Text.StringBuilder sb,
+        bool persistenceEnabled,
+        string? persistencePath,
+        bool loadAttempted,
+        bool loadSucceeded,
+        string? loadDiscardReason,
+        int loadedCount,
+        DateTimeOffset? loadedAt,
+        string loadedNoun,
+        string diskNoun)
+    {
+        sb.AppendLine("    Persistence:");
+        sb.AppendLine($"      Save on shutdown:  {(persistenceEnabled ? $"yes (→ {persistencePath})" : "disabled (in-memory only)")}");
+
+        string loadLine;
+        if (!loadAttempted)
+        {
+            loadLine = "disabled (no persistence path configured)";
+        }
+        else if (loadSucceeded && loadedAt is not null)
+        {
+            loadLine = $"yes — loaded {loadedCount} {loadedNoun} on startup ({loadedAt.Value:u})";
+        }
+        else if (loadDiscardReason is not null)
+        {
+            loadLine = $"no — discarded: {loadDiscardReason}";
+        }
+        else
+        {
+            loadLine = "no — no snapshot found on disk";
+        }
+        sb.AppendLine($"      Load on startup:   {loadLine}");
+        sb.AppendLine($"      {diskNoun}: {DescribeFileOnDisk(persistencePath)}");
+    }
+
+    /// <summary>
+    /// Describe a backing file as "<size>, last modified <UTC>" for the
+    /// koshi_health Persistence block. Returns a placeholder when the file
+    /// does not yet exist or persistence is disabled (#70).
+    /// </summary>
+    internal static string DescribeFileOnDisk(string? path)
+    {
+        if (path is null) return "(in-memory only)";
+        FileInfo info;
+        try
+        {
+            info = new FileInfo(path);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or PathTooLongException or NotSupportedException
+                or UnauthorizedAccessException)
+        {
+            return $"(unreadable: {ex.GetType().Name})";
+        }
+
+        if (!info.Exists)
+        {
+            // Vault backends use a directory rather than a file path; show
+            // the directory entry distinctly so users do not interpret
+            // "no file yet" as a missing vault root.
+            if (Directory.Exists(path)) return "(vault directory, see Records above)";
+            return "(no file yet)";
+        }
+        return $"{FormatBytes(info.Length)}, last modified {info.LastWriteTimeUtc:u}";
+    }
+
+    internal static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
     }
 
     private static string ReadVersion()
