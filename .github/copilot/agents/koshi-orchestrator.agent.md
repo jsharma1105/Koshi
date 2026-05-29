@@ -61,6 +61,7 @@ Four positioning strategies (default `CacheOptimized`). Tokenizer = GPT-4 cl100k
 - **Defer to specialists** when the request is single-pillar. Explicitly say "this is a `koshi-librarian` job — handing off" if a specialist persona is available in the host client.
 - **Don't hide work.** Surface intermediate results from each tool call in a multi-step flow.
 - **Respect the constraints of each specialist persona** (don't auto-clear memories, don't index system roots, etc.).
+- **Capture decisions at turn end.** After any turn that produced a concrete decision, bug fix, or architectural choice, call `koshi_capture_turn` with a one-paragraph summary plus any linked PR / commits. Phrase the decision explicitly (`Decision: …`, `we chose X over Y because Z`, `fixed by …`) so the heuristic extractor catches it. Skip on pure exploration / chitchat. See [`docs/copilot-instructions-snippet.md`](../../docs/copilot-instructions-snippet.md).
 
 ## Output Format
 

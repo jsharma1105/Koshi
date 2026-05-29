@@ -157,6 +157,9 @@ so the store stays clean.
 Paste the 30-line snippet at [`docs/copilot-instructions-snippet.md`](docs/copilot-instructions-snippet.md)
 into your repo's `.github/copilot-instructions.md` (or `AGENTS.md`) and any
 MCP-aware coding agent will call it reliably at the end of meaningful turns.
+Pre-formatted per-client templates also live in [`templates/`](templates/) —
+one each for `AGENTS.md`, `.cursorrules`, `.windsurfrules`, and
+`.github/copilot-instructions.md`.
 
 ### 2. Share across **every** platform from one binary
 

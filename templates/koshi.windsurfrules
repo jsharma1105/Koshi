@@ -1,0 +1,33 @@
+# --- Koshi MCP discipline (https://github.com/jsharma1105/Koshi) ---
+
+# This block tells Windsurf's Cascade agent to use the Koshi MCP server
+# for shared memory and BM25 retrieval, so decisions made in one
+# conversation are visible to the next developer who pulls this repo.
+# The same three rules apply across clients; the wording here is the
+# Windsurf-native .windsurfrules form.
+
+# Before answering any question that might benefit from prior decisions
+# or indexed code in this repo, call koshi_recall and koshi_search.
+# They are cheap and almost always preferable to guessing. Cite any
+# relevant hits in your answer.
+
+# After landing a non-trivial change, debugging a regression, or making
+# an architectural choice in the conversation, call koshi_capture_turn
+# with a one-paragraph summary of what was decided and why. Include any
+# linked PR number or commit SHAs as provenance.
+
+# Phrase decisions explicitly so the deterministic extractor catches
+# them:
+#   - "Decision: switch the cache layer from in-memory to Redis."
+#   - "We chose retry-with-backoff over circuit-breaker because the dep recovers within 5s."
+#   - "Fixed by upgrading the Azure SDK to 9.0.313."
+
+# Skip koshi_capture_turn if the turn was pure discussion, exploration,
+# or chitchat with no concrete decision.
+
+# For long-running threads, use koshi_compile_context with an explicit
+# token budget (typical: 16000) so the prompt window stays predictable
+# and cacheable. Combine retrieval hits and recalled memories in the
+# same compile call.
+
+# --- end Koshi MCP discipline ---
