@@ -450,6 +450,73 @@ else
     Console.Error.WriteLine($"[info] tools/list reported {toolNames.Count} tools");
 }
 
+// ─── Phase 2.5: prompts/list + prompts/get — issue #77 Layer 2 ──────────
+var promptsListResp = await RpcAsync("prompts/list");
+if (promptsListResp is null) { failures.Add("prompts/list: TIMEOUT"); }
+else
+{
+    var promptNames = new HashSet<string>();
+    if (promptsListResp.Value.TryGetProperty("result", out var plr) &&
+        plr.TryGetProperty("prompts", out var prompts) &&
+        prompts.ValueKind == JsonValueKind.Array)
+    {
+        var named = prompts.EnumerateArray()
+            .Where(p => p.ValueKind == JsonValueKind.Object && p.TryGetProperty("name", out _))
+            .Select(p => p.GetProperty("name").GetString() ?? string.Empty);
+        foreach (var n in named) { promptNames.Add(n); }
+    }
+    string[] expectedPrompts = [
+        "koshi/capture-turn-guide",
+        "koshi/recall-before-answer",
+        "koshi/context-pack-discipline",
+        "koshi/score-every-turn",
+    ];
+    foreach (var n in expectedPrompts.Where(n => !promptNames.Contains(n)))
+    {
+        failures.Add($"prompts/list: missing prompt '{n}'");
+    }
+    Console.Error.WriteLine($"[info] prompts/list reported {promptNames.Count} prompts");
+
+    foreach (var promptName in expectedPrompts.Where(promptNames.Contains))
+    {
+        var getResp = await RpcAsync("prompts/get", new { name = promptName });
+        if (getResp is null) { failures.Add($"prompts/get {promptName}: TIMEOUT"); continue; }
+        if (IsErrorResponse(getResp.Value))
+        {
+            failures.Add($"prompts/get {promptName}: server returned error: {getResp.Value.GetRawText()[..Math.Min(200, getResp.Value.GetRawText().Length)]}");
+            continue;
+        }
+        if (!getResp.Value.TryGetProperty("result", out var gr) ||
+            !gr.TryGetProperty("messages", out var msgs) ||
+            msgs.ValueKind != JsonValueKind.Array ||
+            msgs.GetArrayLength() == 0)
+        {
+            failures.Add($"prompts/get {promptName}: missing/empty result.messages");
+            continue;
+        }
+        var firstMsg = msgs[0];
+        string? bodyText = null;
+        if (firstMsg.TryGetProperty("content", out var c))
+        {
+            if (c.ValueKind == JsonValueKind.Object && c.TryGetProperty("text", out var t))
+            {
+                bodyText = t.GetString();
+            }
+            else if (c.ValueKind == JsonValueKind.Array && c.GetArrayLength() > 0 &&
+                     c[0].TryGetProperty("text", out var t2))
+            {
+                bodyText = t2.GetString();
+            }
+        }
+        if (string.IsNullOrWhiteSpace(bodyText) || bodyText!.Length < 100)
+        {
+            failures.Add($"prompts/get {promptName}: body too short or missing (got {(bodyText?.Length ?? 0)} chars)");
+            continue;
+        }
+        Console.Error.WriteLine($"[ok] prompts/get {promptName} ({bodyText.Length} chars)");
+    }
+}
+
 // ─── Phase 3: version-stamp assertion ───────────────────────────────────
 var versionResp = await RpcAsync("tools/call", new { name = "koshi_version", arguments = new { } });
 if (versionResp is null) failures.Add("koshi_version: TIMEOUT");

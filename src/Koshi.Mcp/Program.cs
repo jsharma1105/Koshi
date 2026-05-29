@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Koshi.Mcp.Cli;
+using Koshi.Mcp.Prompts;
 using Koshi.Mcp.Tools;
 using ModelContextProtocol.Server;
 
@@ -89,7 +90,8 @@ builder.Services
     .WithTools<MemoryTools>()
     .WithTools<ContextTools>()
     .WithTools<TeamTools>()
-    .WithTools<DiagnosticTools>();
+    .WithTools<DiagnosticTools>()
+    .WithPrompts<SteeringPrompts>();
 
 await builder.Build().RunAsync();
 return 0;
