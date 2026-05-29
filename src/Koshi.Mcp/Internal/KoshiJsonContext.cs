@@ -51,4 +51,6 @@ namespace Koshi.Mcp.Internal;
 [JsonSerializable(typeof(List<QualityFeedback>))]
 [JsonSerializable(typeof(Dictionary<string, List<QualityScore>>))]
 [JsonSerializable(typeof(Dictionary<string, List<QualityFeedback>>))]
+[JsonSerializable(typeof(ParsedMemoryInput))]
+[JsonSerializable(typeof(List<ParsedMemoryInput>))]
 internal sealed partial class KoshiJsonContext : JsonSerializerContext;

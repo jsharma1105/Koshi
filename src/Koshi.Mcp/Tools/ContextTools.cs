@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Koshi.Core.Context;
 using Koshi.Core.Models;
 using Koshi.Core.Tokenization;
+using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
 
 namespace Koshi.Mcp.Tools;
@@ -24,7 +25,10 @@ public sealed class ContextTools
         [Description("System prompt for the LLM")] string systemPrompt,
         [Description("The user's query")] string userQuery,
         [Description("Retrieved content sections separated by '---' on its own line")] string? retrievedContent = null,
-        [Description("Memory/facts to include (newline-separated)")] string? memories = null,
+        [Description("Memory/facts to include. Preferred structured form: JSON array of {type,subject,content,confidence}. " +
+                     "Also accepts raw koshi_recall output (auto-detected and parsed into one section per entry). " +
+                     "Plain text is treated as a single memory verbatim — use the JSON form for multiple distinct memories.")]
+        string? memories = null,
         [Description("Team context/conventions to include (stable, cacheable)")] string? teamContext = null,
         [Description("Total token budget (default: 8192)")] int tokenBudget = 8192,
         [Description("Positioning strategy: CacheOptimized, PrimacyRecency, RelevanceDescending, Chronological")]
@@ -57,20 +61,21 @@ public sealed class ContextTools
         }
 
         var memoryResults = new List<SearchResult>();
-        if (!string.IsNullOrWhiteSpace(memories))
+        foreach (var parsed in MemoryInputParser.Parse(memories))
         {
-            var memLines = memories.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var mem in memLines)
+            string text = FormatMemoryForChunk(parsed);
+            var tags = new Dictionary<string, string>();
+            if (!string.IsNullOrWhiteSpace(parsed.Subject)) tags["subject"] = parsed.Subject!;
+            if (parsed.Type is not null) tags["type"] = parsed.Type.Value.ToString();
+            var c = new Chunk(
+                $"mcp-memory-{memoryResults.Count}",
+                text,
+                new ChunkMetadata("memory", "memory", 0, text.Length, DateTimeOffset.UtcNow,
+                    Tags: tags.Count > 0 ? tags : null))
             {
-                var c = new Chunk(
-                    $"mcp-memory-{memoryResults.Count}",
-                    mem.Trim(),
-                    new ChunkMetadata("memory", "memory", 0, mem.Length, DateTimeOffset.UtcNow))
-                {
-                    TokenCount = tokenCounter.CountTokens(mem),
-                };
-                memoryResults.Add(new SearchResult(c, 0.8f, "memory"));
-            }
+                TokenCount = tokenCounter.CountTokens(text),
+            };
+            memoryResults.Add(new SearchResult(c, 0.8f, "memory"));
         }
 
         var request = new ContextCompileRequest
@@ -102,6 +107,45 @@ public sealed class ContextTools
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Render a <see cref="ParsedMemory"/> as the text that will be packed into
+    /// a memory section. For recall-format input the Content already contains
+    /// the full header+content+scope block. For JSON-derived memories we add a
+    /// compact header so structured metadata isn't lost.
+    /// </summary>
+    private static string FormatMemoryForChunk(ParsedMemory parsed)
+    {
+        // Recall-format entries: the block we captured already starts with
+        // the "[Type] Subject (score:..., confidence:...%)" header. Use it
+        // verbatim so provenance is preserved.
+        if (parsed.Content.StartsWith("  [", StringComparison.Ordinal) ||
+            parsed.Content.StartsWith("[", StringComparison.Ordinal))
+        {
+            return parsed.Content;
+        }
+
+        // JSON-derived entries: synthesise a header so type/subject/confidence
+        // make it into the prompt.
+        if (parsed.Type is not null || parsed.Subject is not null || parsed.Confidence is not null)
+        {
+            var header = new System.Text.StringBuilder();
+            header.Append('[');
+            header.Append(parsed.Type?.ToString() ?? "Memory");
+            header.Append("] ");
+            header.Append(parsed.Subject ?? "(unspecified)");
+            if (parsed.Confidence is float conf)
+            {
+                header.Append(" (confidence: ");
+                header.Append((conf * 100).ToString("F0", System.Globalization.CultureInfo.InvariantCulture));
+                header.Append("%)");
+            }
+            return header.ToString() + "\n  " + parsed.Content;
+        }
+
+        // Plain text: include verbatim.
+        return parsed.Content;
     }
 
     [McpServerTool(Name = "koshi_token_count"), Description(
