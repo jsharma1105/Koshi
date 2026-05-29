@@ -70,6 +70,16 @@
     <EmbeddedResource Include="..\..\.claude\agents\*.md" LinkBase="Personas\claude" />
   </ItemGroup>
 
+  <!-- Embed the per-ecosystem Layer-3 steering templates (#77 Layer 4) so
+       `koshi-mcp init` can drop them into a project's auto-loaded rule
+       files without depending on the repo layout. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\templates\koshi.AGENTS.md" LinkBase="Templates" />
+    <EmbeddedResource Include="..\..\templates\koshi.copilot-instructions.md" LinkBase="Templates" />
+    <EmbeddedResource Include="..\..\templates\koshi.cursorrules" LinkBase="Templates" />
+    <EmbeddedResource Include="..\..\templates\koshi.windsurfrules" LinkBase="Templates" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Condition="Exists('..\..\LICENSE')" />
