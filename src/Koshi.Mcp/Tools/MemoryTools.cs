@@ -55,12 +55,16 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_remember"), Description(
-        "Store a fact, decision, pattern, or preference in memory. " +
-        "Memories persist across restarts by default (saved to <project-root>/.koshi/memory.json " +
-        "in v0.6.0+). Set KOSHI_MEMORY_FILE to override the path, or KOSHI_MEMORY_VAULT to switch " +
-        "to a Git-friendly Obsidian-style vault. " +
-        "Scope (userId/workspaceId/threadId) controls who can recall the memory. " +
-        "Leave userId unset (or pass '*') to make the memory globally visible.")]
+        "WHEN TO CALL: When the user states a fact, decision, pattern, or preference that should " +
+        "outlive this conversation (e.g., 'we use PostgreSQL 16', 'decided to skip caching for now', " +
+        "'always validate inputs at API boundaries'). Do NOT call for ephemeral chitchat or for things " +
+        "the user is asking you (only for things they are telling you).\n" +
+        "WHAT IT DOES: Persists a structured memory with type/subject/scope. Memories survive restarts " +
+        "by default (saved to <project-root>/.koshi/memory.json; override via KOSHI_MEMORY_FILE or " +
+        "KOSHI_MEMORY_VAULT).\n" +
+        "WHAT YOU GIVE IT: content + subject (required); type (Fact|Decision|Pattern|Preference); " +
+        "confidence 0-1; source; scope filters (userId/workspaceId/threadId — '*' or empty means " +
+        "globally visible).")]
     public static string Remember(
         [Description("The content to remember")] string content,
         [Description("Subject/topic of this memory")] string subject,
@@ -164,10 +168,13 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_recall"), Description(
-        "Recall memories relevant to a topic. Searches stored facts, decisions, and patterns " +
-        "using BM25 keyword ranking blended with recency and confidence. " +
-        "Scope filters (userId/workspaceId/threadId) narrow the candidate set; " +
-        "globally-scoped memories (UserId='*') are always visible regardless of the userId filter.")]
+        "WHEN TO CALL: BEFORE answering any user question that might benefit from prior decisions, " +
+        "patterns, facts, or preferences captured in earlier turns. Cheap — always preferable to making " +
+        "up an answer or asking the user to repeat themselves. Call early in the turn.\n" +
+        "WHAT IT DOES: BM25-keyword search across stored memories blended with recency and confidence. " +
+        "Globally-scoped memories (UserId='*') are always returned regardless of the userId filter.\n" +
+        "WHAT YOU GIVE IT: query (required); type filter (Fact|Decision|Pattern|Preference|All); " +
+        "topK 1-25; scope filters (userId/workspaceId/threadId — empty = no filter).")]
     public static string Recall(
         [Description("Topic or query to search memories for")] string query,
         [Description("Filter by type: Fact, Decision, Pattern, Preference, or All")] string type = "All",
@@ -312,8 +319,10 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_stats"), Description(
-        "Show statistics about stored memories: counts by type, top subjects, average confidence, " +
-        "persistence status, and (for vault backends) counts of unmanaged notes and duplicate-id warnings.")]
+        "WHEN TO CALL: When the user asks how much is remembered, what's dominating memory, or whether " +
+        "persistence is wired correctly. Useful before suggesting koshi_forget or vault export.\n" +
+        "WHAT IT DOES: Reports total count, counts by type, top subjects, average confidence, backend " +
+        "kind, persistence path, and (vault backends) unmanaged-note and duplicate-id warnings.")]
     public static string MemoryStats()
     {
         return _store.WithFreshState(all =>
@@ -364,7 +373,12 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_forget"), Description(
-        "Remove a memory by its subject. Removes all memories matching the subject (case-insensitive).")]
+        "WHEN TO CALL: When the user explicitly asks you to forget something they previously stated " +
+        "(e.g., 'forget what I said about Postgres', 'we don't use that pattern anymore'). NEVER call " +
+        "unprompted — memory is meant to persist.\n" +
+        "WHAT IT DOES: Removes all memories matching the given subject (case-insensitive substring " +
+        "match). Returns the count removed and a deletedIds list.\n" +
+        "WHAT YOU GIVE IT: subject (required — substring of the memory's subject field).")]
     public static string Forget(
         [Description("Subject to forget (case-insensitive match)")] string subject)
     {
@@ -394,8 +408,10 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_clear_memories"), Description(
-        "Clear ALL stored memories. Useful when switching projects or resetting state. " +
-        "Requires confirm=true to actually clear.")]
+        "WHEN TO CALL: Only when the user explicitly asks to wipe all memory (e.g., switching projects, " +
+        "resetting state). Two-step: requires confirm=true on the second call. NEVER call as cleanup.\n" +
+        "WHAT IT DOES: Deletes every stored memory after the confirmation guard.\n" +
+        "WHAT YOU GIVE IT: confirm=true to actually clear; first call without it returns a warning.")]
     public static string ClearMemories(
         [Description("Set to true to confirm deletion of all memories")] bool confirm = false)
     {
@@ -420,11 +436,13 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_export_to_vault"), Description(
-        "Bulk-export current memories as Markdown files into the target vault. " +
-        "Defaults to Obsidian layout (<vaultPath>/koshi/<type>/), independent of the active " +
-        "KOSHI_VAULT_FLAVOR env var. Override via flavor=obsidian|foam|logseq|dendron. " +
-        "By default refuses to write into a non-empty vault. Pass overwrite=true to replace " +
-        "existing koshi-tagged files in the target vault (user notes without koshi.id are never touched).")]
+        "WHEN TO CALL: When the user asks to share memories with teammates via a git-tracked vault, " +
+        "or to migrate from JSON to a vault backend. One-shot bulk export — for ongoing sync, switch " +
+        "KOSHI_MEMORY_VAULT and use koshi_remember normally.\n" +
+        "WHAT IT DOES: Writes all current memories as markdown files under <vaultPath>/koshi/<type>/. " +
+        "Refuses non-empty vaults unless overwrite=true (user notes without koshi.id are never touched).\n" +
+        "WHAT YOU GIVE IT: vaultPath (required); overwrite (default false); flavor " +
+        "(obsidian|foam|logseq|dendron, default obsidian).")]
     public static string ExportToVault(
         [Description("Path to the target vault directory")] string vaultPath,
         [Description("If true, replace existing koshi-tagged files in the vault")] bool overwrite = false,
@@ -466,12 +484,13 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
-        "Import memories from a Markdown vault into the current backend. " +
-        "Defaults to Obsidian layout, independent of the active KOSHI_VAULT_FLAVOR env var. " +
-        "Override via flavor=obsidian|foam|logseq|dendron to match the source vault's layout. " +
-        "mode='merge' (default): id collisions keep current memory. " +
-        "mode='overlay': id collisions, vault wins. " +
-        "mode='replace': drop all current memories, take vault as-is.")]
+        "WHEN TO CALL: When the user asks to pull memories from a teammate-written vault, seed from " +
+        "an existing Obsidian/Foam/Logseq/Dendron vault, or restore from a vault snapshot. One-shot " +
+        "import — for ongoing sync, switch KOSHI_MEMORY_VAULT to the vault directly.\n" +
+        "WHAT IT DOES: Reads markdown files from the vault and applies them per mode: merge keeps " +
+        "current on id collision; overlay lets the vault win; replace drops current and takes vault.\n" +
+        "WHAT YOU GIVE IT: vaultPath (required); mode (merge|overlay|replace, default merge); flavor " +
+        "(obsidian|foam|logseq|dendron, default obsidian).")]
     public static string ImportFromVault(
         [Description("Path to the source vault directory")] string vaultPath,
         [Description("Conflict resolution mode: merge | overlay | replace")] string mode = "merge",
@@ -548,8 +567,10 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_memory_sync_vault"), Description(
-        "Force a re-scan of the vault backend so external edits and git pulls are picked up. " +
-        "No-op when the backend is not a vault.")]
+        "WHEN TO CALL: After the user runs `git pull` on a vault-backed memory store, or whenever you " +
+        "suspect external edits (collaborator wrote new notes, file changed by hand). No-op for " +
+        "non-vault backends.\n" +
+        "WHAT IT DOES: Forces a re-scan of the vault directory and refreshes the in-memory cache.")]
     public static string SyncVault()
     {
         if (_store.Backend.BackendKind != "vault")
@@ -561,14 +582,16 @@ public sealed class MemoryTools
     }
 
     [McpServerTool(Name = "koshi_capture_turn"), Description(
-        "Capture decisions made in the current conversation turn into memory. " +
-        "Pass a 1-3 paragraph summary of the turn and any linked PR/commits. " +
-        "The server applies lightweight pattern heuristics (no LLM) to extract " +
-        "decision-shape sentences and persists each as a Decision memory with " +
-        "provenance. Set auto_promote=false to preview candidates without saving. " +
-        "Recommended: call this once at the end of every meaningful turn — see " +
-        "docs/copilot-instructions-snippet.md for a snippet you can paste into " +
-        "your repo's .github/copilot-instructions.md so the agent calls it reliably.")]
+        "WHEN TO CALL: At the END of any conversation turn that produced a concrete decision, bug fix, " +
+        "architectural choice, or stated preference. Skip pure exploration, chitchat, and turns where " +
+        "nothing was decided. Phrase decisions explicitly in turn_summary ('Decision: X', 'we chose X " +
+        "over Y because Z', 'fixed by doing X') so the extractor can pick them up.\n" +
+        "WHAT IT DOES: Runs lightweight, deterministic pattern heuristics (no LLM, no network) over " +
+        "turn_summary to extract decision-shape sentences, then persists each as a Decision memory with " +
+        "provenance. Set auto_promote=false to preview candidates without saving.\n" +
+        "WHAT YOU GIVE IT: turn_summary (1-3 paragraphs of what was decided); linked_pr (optional); " +
+        "linked_commits (optional, comma-separated SHAs); auto_promote (default true); max_candidates " +
+        "(default 5); min_confidence (0-1, default 0.5).")]
     public static string CaptureTurn(
         [Description("Plain-text summary of the turn (1-3 paragraphs). Decision-shape sentences will be extracted.")]
         string turn_summary,

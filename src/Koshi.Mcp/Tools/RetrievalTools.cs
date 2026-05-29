@@ -122,10 +122,12 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_index"), Description(
-        "Index a list of in-memory documents for BM25 retrieval. " +
-        "Replaces any previously indexed corpus of the same name. " +
-        "Pass a non-default corpus name to keep multiple indexes alive simultaneously (issue #23). " +
-        "For indexing files on disk, use koshi_index_directory instead.")]
+        "WHEN TO CALL: When you have in-memory documents (parsed JSON, fetched URLs, generated text) " +
+        "to make searchable. For files already on disk, use koshi_index_directory instead.\n" +
+        "WHAT IT DOES: Chunks and BM25-indexes the documents under a corpus name. Replaces any prior " +
+        "corpus of the same name. Only the default corpus is persisted via KOSHI_INDEX_FILE.\n" +
+        "WHAT YOU GIVE IT: documents (JSON array of {content, source, type}); optional maxTokens / " +
+        "overlapTokens / corpus name.")]
     public static string Index(
         [Description("JSON array of documents: [{\"content\": \"...\", \"source\": \"filename.md\", \"type\": \"documentation\"}]")]
         string documents,
@@ -178,13 +180,14 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_index_directory"), Description(
-        "Index supported text files from a directory recursively for BM25 retrieval. " +
-        "If no path is provided, falls back to the KOSHI_INDEX_PATH environment variable. " +
-        "Excludes secrets (.env*, *.pem, *.key, *.pfx, secrets.*), build output (bin/obj/dist/node_modules/.git), " +
-        "and files larger than the configured limit. " +
-        "When KOSHI_INDEX_FILE is set, the resulting BM25 corpus is also persisted to disk so the next " +
-        "server start can serve searches without re-indexing. " +
-        "This replaces any previously indexed corpus.")]
+        "WHEN TO CALL: When the user asks to make a project/folder searchable, or once at session start " +
+        "if KOSHI_INDEX_PATH is set and nothing is yet indexed. Required before koshi_search returns " +
+        "useful results on disk content.\n" +
+        "WHAT IT DOES: Recursively indexes supported text files under path (or $KOSHI_INDEX_PATH). " +
+        "Excludes secrets (.env*, *.pem, *.key, secrets.*), build outputs (bin/obj/dist/node_modules/.git), " +
+        "and files over the size limit. Persists to KOSHI_INDEX_FILE if set. Replaces the corpus.\n" +
+        "WHAT YOU GIVE IT: path (optional — defaults to $KOSHI_INDEX_PATH); pattern (optional glob); " +
+        "maxFileSizeKb (default 256); maxFiles (default 5000); optional chunker tuning; optional corpus.")]
     public static string IndexDirectory(
         [Description("Absolute directory path to index (defaults to $KOSHI_INDEX_PATH)")]
         string? path = null,
@@ -289,11 +292,13 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_search"), Description(
-        "Search the indexed corpus using BM25 keyword retrieval. " +
-        "Returns the most relevant chunks for the query. " +
-        "If no corpus is indexed and KOSHI_INDEX_FILE points to a valid snapshot, it is loaded automatically. " +
-        "Otherwise, if KOSHI_INDEX_PATH is set, the path will be auto-indexed once on first use. " +
-        "Pass corpus='<name>' to search a non-default named corpus (issue #23).")]
+        "WHEN TO CALL: BEFORE answering any code or documentation question about the indexed project. " +
+        "Cheap — always preferable to guessing or asking the user to paste files. Call early in the " +
+        "turn, ideally in parallel with koshi_recall.\n" +
+        "WHAT IT DOES: BM25 keyword search over the indexed corpus. Auto-loads from KOSHI_INDEX_FILE " +
+        "if a snapshot exists; auto-indexes KOSHI_INDEX_PATH once on first use if neither is loaded.\n" +
+        "WHAT YOU GIVE IT: query (required); topK (1-50, default 5); corpus (optional — see " +
+        "koshi_list_indexed for names).")]
     public static string Search(
         [Description("The search query")] string query,
         [Description("Number of results to return (1-50, default: 5)")] int topK = 5,
@@ -404,7 +409,11 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_list_indexed"), Description(
-        "List indexed corpora. Pass corpus=null (default) to see all corpora; pass a name to see chunk-level detail for a single corpus.")]
+        "WHEN TO CALL: Before searching, to confirm which corpora and files are actually indexed; or " +
+        "to verify that an index_directory call landed.\n" +
+        "WHAT IT DOES: Lists every indexed corpus with chunk and source counts. Pass a corpus name " +
+        "for per-source chunk-level detail.\n" +
+        "WHAT YOU GIVE IT: corpus (optional — omit for summary of all corpora; name for detail).")]
     public static string ListIndexed(
         [Description("Optional corpus name. When omitted, lists every corpus (default + named). When provided, shows per-source chunk counts for that corpus only.")]
         string? corpus = null)
@@ -496,10 +505,12 @@ public sealed class RetrievalTools
     }
 
     [McpServerTool(Name = "koshi_clear_index"), Description(
-        "Clear an indexed corpus. Useful when switching between projects without restarting the server. " +
-        "Defaults to the 'default' corpus (which also removes the persisted snapshot file when KOSHI_INDEX_FILE is set). " +
-        "Pass corpus='*' to clear every corpus (default and named). " +
-        "Pass corpus='<name>' to clear a single named corpus.")]
+        "WHEN TO CALL: When the user asks to switch projects, reset retrieval state, or drop a named " +
+        "corpus. Default-corpus clear also removes the persisted snapshot.\n" +
+        "WHAT IT DOES: Drops the named corpus (default if omitted) from memory. For the default corpus, " +
+        "also deletes the KOSHI_INDEX_FILE snapshot if set. Pass corpus='*' to clear everything.\n" +
+        "WHAT YOU GIVE IT: corpus (optional — null/'default' for default + snapshot; '*' for all; name " +
+        "for a single named corpus).")]
     public static string ClearIndex(
         [Description("Corpus to clear. 'default' (or null) clears the default corpus + snapshot; '*' clears all corpora; any other value clears that named corpus only.")]
         string? corpus = null)

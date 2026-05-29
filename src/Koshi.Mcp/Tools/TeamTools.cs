@@ -78,7 +78,13 @@ public sealed class TeamTools
     }
 
     [McpServerTool(Name = "koshi_register_team"), Description(
-        "Register a team with custom configuration for context engineering.")]
+        "WHEN TO CALL: When the user asks to set up team-scoped quality tracking and context " +
+        "engineering policy (token budget, topK, quality target, system prompt). Once per team — " +
+        "subsequent calls update. Skip if the project does not need per-team policy.\n" +
+        "WHAT IT DOES: Persists a TeamProfile so koshi_score_turn / koshi_team_dashboard / " +
+        "koshi_analyze_feedback can attribute scores and metrics to this team across restarts.\n" +
+        "WHAT YOU GIVE IT: teamId + name (required); description; tokenBudget (default 8192); topK " +
+        "(default 5); qualityTarget (0-1, default 0.7); systemPrompt; teamContext (cacheable).")]
     public static string RegisterTeam(
         [Description("Unique team identifier (e.g., 'platform-team')")] string teamId,
         [Description("Team display name")] string name,
@@ -118,8 +124,13 @@ public sealed class TeamTools
     }
 
     [McpServerTool(Name = "koshi_score_turn"), Description(
-        "Score the quality of an AI interaction turn. " +
-        "Provide metrics about the turn and get a composite quality score.")]
+        "WHEN TO CALL: After responding to the user, to score the just-completed turn against the " +
+        "team's quality config. Skip if no team is registered for this workspace. Cheap — call once " +
+        "per meaningful turn.\n" +
+        "WHAT IT DOES: Computes a composite quality score across retrieval / efficiency / cache / " +
+        "latency / user-rating dimensions; appends to the team's score and metrics history (persisted).\n" +
+        "WHAT YOU GIVE IT: teamId (required); retrievedChunks; memoriesRecalled; budgetUtilization " +
+        "(0-1); cacheRatio (0-1); latencyMs; userRating (1-5, 0 = no rating); optional metric tags.")]
     public static string ScoreTurn(
         [Description("Team ID to score for")] string teamId,
         [Description("Number of retrieved chunks used")] int retrievedChunks = 0,
@@ -193,7 +204,11 @@ public sealed class TeamTools
     }
 
     [McpServerTool(Name = "koshi_team_dashboard"), Description(
-        "Show quality dashboard for a registered team with trends and recommendations.")]
+        "WHEN TO CALL: When the user asks how the team is doing, when investigating a drop in answer " +
+        "quality, or when reviewing score trends. Requires the team to be registered.\n" +
+        "WHAT IT DOES: Renders the team's quality dashboard — score trend, latency / budget / cache " +
+        "metrics, target-attainment, and recommendations.\n" +
+        "WHAT YOU GIVE IT: teamId (required).")]
     public static string Dashboard(
         [Description("Team ID to show dashboard for")] string teamId)
     {
@@ -206,7 +221,11 @@ public sealed class TeamTools
     }
 
     [McpServerTool(Name = "koshi_analyze_feedback"), Description(
-        "Analyze quality trends for a team and get config improvement suggestions.")]
+        "WHEN TO CALL: When the user asks for tuning recommendations after at least 3 turns have been " +
+        "scored for this team. Returns ⚠ if there is insufficient data.\n" +
+        "WHAT IT DOES: Trend analysis across recent scores — direction, weakest dimension, and concrete " +
+        "config-key adjustments (e.g., raise topK, lower budget).\n" +
+        "WHAT YOU GIVE IT: teamId (required).")]
     public static string AnalyzeFeedback(
         [Description("Team ID to analyze")] string teamId)
     {
@@ -251,7 +270,10 @@ public sealed class TeamTools
     }
 
     [McpServerTool(Name = "koshi_list_teams"), Description(
-        "List all registered teams and their configurations.")]
+        "WHEN TO CALL: To check which teams are registered before scoring or analysing, or when the " +
+        "user asks 'which teams do we have set up?'.\n" +
+        "WHAT IT DOES: Lists every registered team with id, name, budget, topK, target, and current " +
+        "average quality score.")]
     public static string ListTeams()
     {
         var teams = _registry.ListTeams();

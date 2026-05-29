@@ -15,7 +15,8 @@ public sealed class DiagnosticTools
     private static readonly Lazy<string> _version = new(ReadVersion);
 
     [McpServerTool(Name = "koshi_version"), Description(
-        "Return the Koshi MCP server version, .NET runtime version, and protocol version.")]
+        "WHEN TO CALL: When the user asks what version of Koshi is running, or before reporting a bug.\n" +
+        "WHAT IT DOES: Returns the Koshi MCP server version, .NET runtime, OS, process id, and start time.")]
     public static string Version()
     {
         var sb = new System.Text.StringBuilder();
@@ -28,8 +29,11 @@ public sealed class DiagnosticTools
     }
 
     [McpServerTool(Name = "koshi_health"), Description(
-        "Report the runtime health and configuration of the Koshi MCP server: " +
-        "indexed corpus size, memory store status, persistence configuration, and uptime.")]
+        "WHEN TO CALL: When something is not working as expected — search returns nothing, memories " +
+        "do not survive restart, the team dashboard shows zeros, or the user reports persistence issues. " +
+        "Always preferable to guessing whether persistence is wired correctly.\n" +
+        "WHAT IT DOES: Reports indexed corpus size, memory store backend + persistence path, team " +
+        "registry state, snapshot-load status, and uptime. Read-only; never mutates state.")]
     public static string Health()
     {
         var indexStatus = RetrievalTools.GetStatus();
