@@ -1,4 +1,4 @@
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>
 /// Static knowledge about the <c>KOSHI_*</c> path env vars and a doctor-friendly

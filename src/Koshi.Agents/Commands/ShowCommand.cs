@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Koshi.Agents.Internal;
+using Koshi.Mcp.Cli.Setup;
 using Spectre.Console;
 using Spectre.Console.Cli;
 

@@ -76,11 +76,9 @@ public sealed class ConfigCommandTests
     /// <summary>
     /// Path-math parity test: <see cref="McpClientPaths.Resolve(string,string?,string?)"/>
     /// must agree with the canonical layout documented in
-    /// <c>Koshi.Agents.Internal.ClientResolver.McpConfigFile</c>. The expected
-    /// values are reproduced here verbatim (rather than referencing
-    /// <c>Koshi.Agents</c>) because <c>Koshi.Mcp</c> intentionally has no
-    /// dependency on the soon-to-be-deprecated agents assembly. If you change
-    /// one resolver, change the other and update this test.
+    /// <c>Koshi.Mcp.Cli.Setup.ClientResolver.McpConfigFile</c>. The expected
+    /// values are reproduced here verbatim. If you change one resolver, change
+    /// the other and update this test.
     /// </summary>
     [Fact]
     public void Resolve_matches_ClientResolver_canonical_layout()

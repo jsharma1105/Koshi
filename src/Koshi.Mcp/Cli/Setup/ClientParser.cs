@@ -1,4 +1,4 @@
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 internal static class ClientParser
 {

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Koshi.Mcp.Cli.Setup;
 
 namespace Koshi.Agents.Internal;
 

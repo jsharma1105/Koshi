@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>Outcome of a single MCP-config registration attempt for one client.</summary>
 internal enum McpRegisterOutcome
@@ -49,9 +49,11 @@ internal static class McpConfigWriter
 
     public static McpRegisterResult RegisterKoshi(
         PersonaClient client,
-        bool dryRun)
+        bool dryRun,
+        string? homeDir = null,
+        string? appDataDir = null)
     {
-        var configPath = ClientResolver.McpConfigFile(client);
+        var configPath = ClientResolver.McpConfigFile(client, homeDir, appDataDir);
 
         try
         {

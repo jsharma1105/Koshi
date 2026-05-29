@@ -1,11 +1,10 @@
 using System.Text.Json;
 
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>
-/// Parsed view of one client's <c>mcpServers.koshi</c> entry. Used by
-/// <see cref="Commands.DoctorCommand"/> to drive a per-client live ping using
-/// the exact command/args/env the client would invoke.
+/// Parsed view of one client's <c>mcpServers.koshi</c> entry. Used to drive a
+/// per-client live ping using the exact command/args/env the client would invoke.
 /// </summary>
 internal sealed record ClientKoshiEntry(
     string Command,
