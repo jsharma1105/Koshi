@@ -171,13 +171,26 @@ public sealed class ContextTools
         "split across system prompt, team context, retrieval, memory, and history. Skip if you already " +
         "know your allocation.\n" +
         "WHAT IT DOES: Computes fixed costs (system + team), then suggests how to divide the remaining " +
-        "budget 50/25/25 across retrieval/memory/history. Reports cache-savings potential.\n" +
-        "WHAT YOU GIVE IT: totalBudget (default 8192); systemPrompt (optional, to measure its size); " +
-        "teamContext (optional).")]
+        "budget across retrieval/memory/history. Default split is 50/25/25; pass reserveHistory=false " +
+        "for one-shot/batch flows that don't supply conversation history (reclaims the 25% history slice " +
+        "into a 67/33 retrieval/memory split). Override entirely with retrievalPct/memoryPct/historyPct.\n" +
+        "WHAT YOU GIVE IT: totalBudget (default 8192); systemPrompt / teamContext (optional, sized for " +
+        "fixed cost); reserveHistory (default true); retrievalPct + memoryPct + historyPct (optional " +
+        "explicit override — must sum to 100).")]
     public static string PlanBudget(
         [Description("Total token budget")] int totalBudget = 8192,
         [Description("System prompt text (to measure its size)")] string? systemPrompt = null,
-        [Description("Team context text")] string? teamContext = null)
+        [Description("Team context text")] string? teamContext = null,
+        [Description("Reserve a slice for conversation history (default true). Pass false for one-shot " +
+                     "or batch flows with no history to reclaim that slice into retrieval+memory.")]
+        bool reserveHistory = true,
+        [Description("Explicit retrieval percentage 0-100 (optional). When set, memoryPct and historyPct " +
+                     "must also be set and the three must sum to 100. Overrides reserveHistory.")]
+        int? retrievalPct = null,
+        [Description("Explicit memory percentage 0-100 (optional, paired with retrievalPct + historyPct).")]
+        int? memoryPct = null,
+        [Description("Explicit history percentage 0-100 (optional, paired with retrievalPct + memoryPct).")]
+        int? historyPct = null)
     {
         if (totalBudget < 1) totalBudget = 8192;
         var tokenCounter = TokenCounters.Shared;
@@ -185,7 +198,13 @@ public sealed class ContextTools
         int systemTokens = systemPrompt is not null ? tokenCounter.CountTokens(systemPrompt) : 0;
         int teamTokens = teamContext is not null ? tokenCounter.CountTokens(teamContext) : 0;
         int fixedCost = systemTokens + teamTokens;
-        int remaining = totalBudget - fixedCost;
+        int remaining = Math.Max(0, totalBudget - fixedCost);
+
+        var (rPct, mPct, hPct, splitNote) = ResolveSplit(reserveHistory, retrievalPct, memoryPct, historyPct);
+
+        int retrievalTokens = remaining * rPct / 100;
+        int memoryTokens = remaining * mPct / 100;
+        int historyTokens = remaining * hPct / 100;
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Budget Plan ({totalBudget} tokens total) ═══\n");
@@ -197,13 +216,70 @@ public sealed class ContextTools
         sb.AppendLine();
         sb.AppendLine($"Available for dynamic content: {remaining} tokens");
         sb.AppendLine();
-        sb.AppendLine($"Suggested allocation:");
-        sb.AppendLine($"  Retrieval (50%): {remaining * 50 / 100,6} tokens (~{remaining * 50 / 100 / 512} chunks)");
-        sb.AppendLine($"  Memory (25%):    {remaining * 25 / 100,6} tokens (~{remaining * 25 / 100 / 100} memories)");
-        sb.AppendLine($"  History (25%):   {remaining * 25 / 100,6} tokens (~{remaining * 25 / 100 / 200} turns)");
+        if (!string.IsNullOrEmpty(splitNote))
+        {
+            sb.AppendLine($"Suggested allocation ({splitNote}):");
+        }
+        else
+        {
+            sb.AppendLine($"Suggested allocation:");
+        }
+        sb.AppendLine($"  Retrieval ({rPct,3}%): {retrievalTokens,6} tokens (~{retrievalTokens / 512} chunks)");
+        sb.AppendLine($"  Memory    ({mPct,3}%): {memoryTokens,6} tokens (~{memoryTokens / 100} memories)");
+        if (hPct > 0)
+        {
+            sb.AppendLine($"  History   ({hPct,3}%): {historyTokens,6} tokens (~{historyTokens / 200} turns)");
+        }
+        else
+        {
+            sb.AppendLine($"  History   (  0%):      0 tokens (not reserved)");
+        }
         sb.AppendLine();
         sb.AppendLine($"Cache savings: stable prefix of {fixedCost} tokens saves ~{fixedCost * 0.5:F0} tokens/call with prompt caching");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Resolves the retrieval/memory/history percentage split for the budget
+    /// plan. Explicit per-role percentages (Option C in #73) take precedence
+    /// over the reserveHistory toggle (Option B); if none is supplied we fall
+    /// back to the historical 50/25/25 default.
+    /// </summary>
+    /// <returns>
+    /// Tuple of (retrievalPct, memoryPct, historyPct, splitNote) where
+    /// splitNote is an empty string for the default split and a short
+    /// human-readable explanation otherwise.
+    /// </returns>
+    internal static (int RetrievalPct, int MemoryPct, int HistoryPct, string Note) ResolveSplit(
+        bool reserveHistory, int? retrievalPct, int? memoryPct, int? historyPct)
+    {
+        bool anyExplicit = retrievalPct.HasValue || memoryPct.HasValue || historyPct.HasValue;
+        if (anyExplicit)
+        {
+            int r = retrievalPct ?? 0;
+            int m = memoryPct ?? 0;
+            int h = historyPct ?? 0;
+            if (r < 0 || m < 0 || h < 0)
+            {
+                throw new ArgumentException(
+                    $"retrievalPct/memoryPct/historyPct must each be >= 0 (got {r}/{m}/{h}).");
+            }
+            if (r + m + h != 100)
+            {
+                throw new ArgumentException(
+                    $"retrievalPct + memoryPct + historyPct must sum to 100 (got {r}+{m}+{h}={r + m + h}).");
+            }
+            return (r, m, h, $"explicit override {r}/{m}/{h}");
+        }
+
+        if (!reserveHistory)
+        {
+            // Reclaim the 25% history slice into the 50/25 retrieval+memory
+            // base proportionally, yielding ~67/33.
+            return (67, 33, 0, "no history reserved, reclaiming 25%");
+        }
+
+        return (50, 25, 25, string.Empty);
     }
 }
