@@ -76,7 +76,7 @@ internal sealed class UninstallCommand : Command<UninstallCommand.Settings>
             settings.DryRun
                 ? "[grey]Dry run — no files removed.[/]"
                 : $"[bold]Done.[/] deleted={deletes} not-present={missing} errors={errors}");
-        AnsiConsole.MarkupLine("[grey]Your MCP config (settings.json / mcp_config.json) was not modified.[/]");
+        AnsiConsole.MarkupLine("[grey]Your MCP config (settings.json / mcp-config.json) was not modified.[/]");
 
         return errors == 0 ? 0 : 1;
     }

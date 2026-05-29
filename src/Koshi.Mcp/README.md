@@ -163,7 +163,7 @@ copilot mcp add koshi koshi-mcp \
   --env KOSHI_MEMORY_FILE=/path/to/memory.json
 ```
 
-Or add manually to `~/.copilot/mcp_config.json`:
+Or add manually to `~/.copilot/mcp-config.json`:
 
 ```json
 {

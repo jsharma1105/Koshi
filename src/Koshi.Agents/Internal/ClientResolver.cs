@@ -46,7 +46,7 @@ internal static class ClientResolver
             Path.Join(HomeDir, ".config", "Claude", "claude_desktop_config.json"),
 
         PersonaClient.Copilot =>
-            Path.Join(HomeDir, ".copilot", "mcp_config.json"),
+            Path.Join(HomeDir, ".copilot", "mcp-config.json"),
 
         _ => throw new ArgumentOutOfRangeException(nameof(client)),
     };

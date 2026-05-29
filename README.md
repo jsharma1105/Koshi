@@ -162,7 +162,7 @@ visible to all of them.
 
 | Platform | One-line setup | Config file |
 |---|---|---|
-| **GitHub Copilot CLI** | `copilot mcp add koshi koshi-mcp --env KOSHI_MEMORY_VAULT=./team-memories` | `~/.copilot/mcp_config.json` |
+| **GitHub Copilot CLI** | `copilot mcp add koshi koshi-mcp --env KOSHI_MEMORY_VAULT=./team-memories` | `~/.copilot/mcp-config.json` |
 | **Claude Code / Desktop** | edit JSON: `{ "mcpServers": { "koshi": { "command": "koshi-mcp" } } }` | `claude_desktop_config.json` / `.claude/settings.json` |
 | **Cursor / Windsurf** | drop the same JSON into the workspace `mcp.json` | `.cursor/mcp.json` |
 | **Microsoft Agency CLI** | `agency mcp local --command koshi-mcp` | `plugin.json` (shipped) |
