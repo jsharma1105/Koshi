@@ -30,12 +30,29 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
             "Skip registering the koshi MCP server in the client's mcp config. " +
             "Personas are still installed; you must register koshi-mcp yourself.")]
         public bool NoMcp { get; init; }
+
+        [CommandOption("-q|--quiet")]
+        [Description("Suppress the Next Steps banner (for scripted installs).")]
+        public bool Quiet { get; init; }
+
+        [CommandOption("--show-next-steps")]
+        [Description(
+            "Print the Next Steps banner without installing or modifying anything. " +
+            "Useful for re-reading the post-install guidance after the fact.")]
+        public bool ShowNextStepsOnly { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var clients = ClientParser.Parse(settings.Client);
         var scope = ClientParser.ParseScope(settings.Scope);
+
+        if (settings.ShowNextStepsOnly)
+        {
+            EmitShowOnlyBanner(clients, scope);
+            return 0;
+        }
+
         var personas = PersonaCatalog.Discover();
 
         var writes = 0;
@@ -134,13 +151,38 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
                 ? "[grey]Dry run — no files written.[/]"
                 : $"[bold]Done.[/] wrote={writes} skipped={skips} errors={errors}");
 
-        if (!settings.DryRun && writes > 0)
+        if (!settings.DryRun && writes > 0 && !settings.Quiet)
         {
             AnsiConsole.WriteLine();
-            EmitNextSteps(mcpResults, settings.NoMcp);
+            EmitNextSteps(clients, scope, mcpResults, settings.NoMcp);
         }
 
         return errors == 0 ? 0 : 1;
+    }
+
+    private static void EmitShowOnlyBanner(
+        IReadOnlyList<PersonaClient> clients,
+        ScopeKind scope)
+    {
+        foreach (var client in clients)
+        {
+            var dir = ClientResolver.AgentsDir(client, scope);
+            AnsiConsole.Write(new Rule(
+                $"[cyan]{client.ToString().ToLowerInvariant()}[/] -> [grey]{Markup.Escape(dir)}[/]")
+                .LeftJustified());
+
+            // For --show-next-steps we don't probe the MCP config (we want
+            // identical output regardless of current state), so pass null
+            // mcpResult + skippedMcp=true to render the manual-registration
+            // path. Users in this mode are typically looking at the
+            // instructions, not at the current registration status.
+            foreach (var line in NextStepsBanner.Render(client, dir, mcpResult: null, skippedMcp: true))
+            {
+                AnsiConsole.MarkupLine(line);
+            }
+
+            AnsiConsole.WriteLine();
+        }
     }
 
     private static void ReportMcpResult(McpRegisterResult result)
@@ -174,37 +216,25 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
     }
 
     private static void EmitNextSteps(
+        IReadOnlyList<PersonaClient> clients,
+        ScopeKind scope,
         IReadOnlyList<(PersonaClient Client, McpRegisterResult Result)> mcpResults,
         bool skippedMcp)
     {
-        if (skippedMcp)
+        foreach (var client in clients)
         {
-            AnsiConsole.MarkupLine(
-                "[bold]Next:[/] register the [cyan]koshi[/] MCP server in each client " +
-                "(you passed [yellow]--no-mcp[/]).");
-            AnsiConsole.MarkupLine("[grey]  • Copilot CLI: [bold]copilot mcp add koshi -- koshi-mcp[/][/]");
-            AnsiConsole.MarkupLine(
-                "[grey]  • Claude Desktop: add the koshi entry to " +
-                "claude_desktop_config.json manually[/]");
-        }
-        else
-        {
-            var anyWritten = mcpResults.Any(r =>
-                r.Result.Outcome is McpRegisterOutcome.Created
-                                  or McpRegisterOutcome.Added);
-            if (anyWritten)
+            var dir = ClientResolver.AgentsDir(client, scope);
+            var mcpResult = mcpResults.FirstOrDefault(r => r.Client == client).Result;
+
+            foreach (var line in NextStepsBanner.Render(client, dir, mcpResult, skippedMcp))
             {
-                AnsiConsole.MarkupLine(
-                    "[bold]Next:[/] restart your client so it picks up the new " +
-                    "[cyan]koshi[/] MCP server entry, then invoke a persona.");
+                AnsiConsole.MarkupLine(line);
             }
-            else
+
+            if (clients.Count > 1)
             {
-                AnsiConsole.MarkupLine(
-                    "[bold]Next:[/] invoke a persona — e.g. " +
-                    "[cyan]copilot --agent koshi-orchestrator \"ping\"[/].");
+                AnsiConsole.WriteLine();
             }
         }
-        AnsiConsole.MarkupLine("[grey]Run [bold]koshi-agents doctor[/] to verify.[/]");
     }
 }
