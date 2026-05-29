@@ -6,6 +6,7 @@ using Koshi.Core.Models;
 using Koshi.Core.Retrieval;
 using Koshi.Core.Tokenization;
 using Koshi.Mcp.Internal;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Koshi.Mcp.Tools;
@@ -193,10 +194,12 @@ public sealed class RetrievalTools
         "useful results on disk content.\n" +
         "WHAT IT DOES: Recursively indexes supported text files under path (or $KOSHI_INDEX_PATH). " +
         "Excludes secrets (.env*, *.pem, *.key, secrets.*), build outputs (bin/obj/dist/node_modules/.git), " +
-        "and files over the size limit. Persists to KOSHI_INDEX_FILE if set. Replaces the corpus.\n" +
+        "and files over the size limit. Persists to KOSHI_INDEX_FILE if set. Replaces the corpus. " +
+        "Streams '[indexing] N/M file (pct%, ETA)' progress on stderr (suppress with KOSHI_INDEX_VERBOSE=0) " +
+        "and emits MCP notifications/progress when the client supplies a progressToken.\n" +
         "WHAT YOU GIVE IT: path (optional — defaults to $KOSHI_INDEX_PATH); pattern (optional glob); " +
         "maxFileSizeKb (default 256); maxFiles (default 5000); optional chunker tuning; optional corpus.")]
-    public static string IndexDirectory(
+    public static async Task<string> IndexDirectory(
         [Description("Absolute directory path to index (defaults to $KOSHI_INDEX_PATH)")]
         string? path = null,
         [Description("Glob pattern to filter files (e.g. '*.md'). If empty, all supported text file types are indexed.")]
@@ -208,7 +211,9 @@ public sealed class RetrievalTools
         [Description("Optional chunker overlap between chunks (default 50, range 0-256, must be < maxTokens/2). Falls back to KOSHI_CHUNK_OVERLAP_TOKENS env var.")]
         int? overlapTokens = null,
         [Description("Optional named corpus to write into. Defaults to 'default'. Named corpora are session-only — only the default corpus is persisted via KOSHI_INDEX_FILE.")]
-        string? corpus = null)
+        string? corpus = null,
+        RequestContext<CallToolRequestParams>? context = null,
+        CancellationToken cancellationToken = default)
     {
         var dirPath = ResolveIndexPath(path);
         if (dirPath is null)
@@ -231,9 +236,28 @@ public sealed class RetrievalTools
             MaxFiles = maxFiles,
         };
 
+        // Wire up progress sinks (stderr always-on unless KOSHI_INDEX_VERBOSE=0;
+        // MCP notifications/progress only when the caller sent a progressToken).
+        var sinks = new List<IIndexProgressSink>(capacity: 2);
+        if (StderrProgressEnabled()) sinks.Add(new StderrIndexProgressSink());
+        if (context is not null
+            && context.Params?.ProgressToken is { } token
+            && context.Server is { } server)
+        {
+            sinks.Add(new McpIndexProgressSink(server, token));
+        }
+
         IEnumerable<string> files;
         try
         {
+            // Emit an "enumerating…" heartbeat BEFORE materialising the list:
+            // on network mounts or huge trees the enumeration itself can be the
+            // longest pause and the user otherwise sees pure silence.
+            if (sinks.Count > 0)
+            {
+                var preEnum = new IndexProgressReporter(total: 0, sinks);
+                await preEnum.ReportEnumeratingAsync(dirPath, cancellationToken).ConfigureAwait(false);
+            }
             files = SafeFileEnumerator.EnumerateIndexableFiles(dirPath, enumeration.Pattern, maxBytes, maxFiles);
         }
         catch (UnauthorizedAccessException ex)
@@ -254,20 +278,32 @@ public sealed class RetrievalTools
         var allChunks = new List<Chunk>(capacity: fileList.Count * 4);
         int skipped = 0;
 
+        var reporter = new IndexProgressReporter(fileList.Count, sinks);
+        int processed = 0;
+
         foreach (var file in fileList)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            processed++;
+            int chunkCountForFile = 0;
+            string relativePath = Path.GetRelativePath(dirPath, file);
             try
             {
                 var content = File.ReadAllText(file);
-                if (string.IsNullOrWhiteSpace(content)) { skipped++; continue; }
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    skipped++;
+                }
+                else
+                {
+                    var ext = Path.GetExtension(file).TrimStart('.');
+                    var chunks = chunker.Chunk(content, relativePath, string.IsNullOrEmpty(ext) ? "document" : ext);
+                    chunkCountForFile = chunks.Count;
+                    allChunks.AddRange(chunks);
 
-                var relativePath = Path.GetRelativePath(dirPath, file);
-                var ext = Path.GetExtension(file).TrimStart('.');
-                var chunks = chunker.Chunk(content, relativePath, string.IsNullOrEmpty(ext) ? "document" : ext);
-                allChunks.AddRange(chunks);
-
-                if (allChunks.Count > MaxChunks)
-                    return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Use a pattern filter to reduce scope.";
+                    if (allChunks.Count > MaxChunks)
+                        return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Use a pattern filter to reduce scope.";
+                }
             }
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
@@ -275,6 +311,16 @@ public sealed class RetrievalTools
             {
                 _ = ex;
                 skipped++;
+            }
+            finally
+            {
+                // Always report — including skips and errors — so the throttle's
+                // "final emit at processed==total" invariant cannot desync if the
+                // very last file happens to be empty or unreadable. Awaiting here
+                // (rather than fire-and-forget) keeps the final notification
+                // ordered before the tool response (rubber-duck catch).
+                await reporter.ReportAsync(processed, relativePath, chunkCountForFile, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
 
@@ -297,6 +343,23 @@ public sealed class RetrievalTools
         if (IsDefaultCorpus(corpusName) && _persistence.IsEnabled) msg += $"\n   Snapshot saved → {_persistence.Path}";
         if (!IsDefaultCorpus(corpusName)) msg += "\n   (named corpus — not persisted to disk)";
         return msg;
+    }
+
+    /// <summary>
+    /// Honour <c>KOSHI_INDEX_VERBOSE</c>: any of <c>0</c>/<c>off</c>/<c>false</c>/<c>no</c>
+    /// (case-insensitive) suppresses stderr progress lines. Default ON because
+    /// the throttle caps emissions at ~2 lines/sec and stderr is already the
+    /// canonical Koshi logging channel (Program.cs:71).
+    /// </summary>
+    internal static bool StderrProgressEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("KOSHI_INDEX_VERBOSE");
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        var v = raw.Trim();
+        return !(v.Equals("0", StringComparison.Ordinal)
+              || v.Equals("off", StringComparison.OrdinalIgnoreCase)
+              || v.Equals("false", StringComparison.OrdinalIgnoreCase)
+              || v.Equals("no", StringComparison.OrdinalIgnoreCase));
     }
 
     [McpServerTool(Name = "koshi_search"), Description(
@@ -367,7 +430,11 @@ public sealed class RetrievalTools
 
             _lastAutoIndexAttempt = now;
             Console.Error.WriteLine($"[koshi] auto-indexing from KOSHI_INDEX_PATH='{envPath}'");
-            var auto = IndexDirectory(envPath);
+            // IndexDirectory was made async in #69 to support awaited progress
+            // notifications; the synchronous auto-index path stays sync to keep
+            // Search()'s public signature unchanged. ConfigureAwait(false) keeps
+            // the continuation off any captured context.
+            var auto = IndexDirectory(envPath).ConfigureAwait(false).GetAwaiter().GetResult();
             if (auto.StartsWith('❌'))
             {
                 var failureMsg = "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
