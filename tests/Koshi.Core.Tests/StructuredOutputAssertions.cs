@@ -14,9 +14,10 @@ internal static class StructuredOutputAssertions
     /// <summary>
     /// Parse a tool's JSON-mode string output and assert it represents a
     /// successful envelope. Returns the parsed <c>data</c> element for the
-    /// caller to drill into.
+    /// caller to drill into. When <paramref name="expectedTool"/> is provided,
+    /// asserts the envelope's <c>tool</c> field equals it.
     /// </summary>
-    public static JsonElement AssertOkEnvelope(string output)
+    public static JsonElement AssertOkEnvelope(string output, string? expectedTool = null)
     {
         AssertNoTextPollution(output);
         using var doc = JsonDocument.Parse(output);
@@ -26,6 +27,7 @@ internal static class StructuredOutputAssertions
         Assert.Equal(OutputFormatting.SchemaVersion, root.GetProperty("schema_version").GetInt32());
         Assert.True(root.GetProperty("ok").GetBoolean(), $"Expected ok=true; envelope was: {output}");
         Assert.Equal(JsonValueKind.Null, root.GetProperty("error").ValueKind);
+        AssertToolField(root, expectedTool);
 
         var data = root.GetProperty("data");
         Assert.NotEqual(JsonValueKind.Null, data.ValueKind);
@@ -34,9 +36,11 @@ internal static class StructuredOutputAssertions
 
     /// <summary>
     /// Parse a tool's JSON-mode string output and assert it represents an
-    /// error envelope with the expected stable error code.
+    /// error envelope with the expected stable error code. When
+    /// <paramref name="expectedTool"/> is provided, asserts the envelope's
+    /// <c>tool</c> field equals it.
     /// </summary>
-    public static void AssertErrorEnvelope(string output, string expectedCode)
+    public static void AssertErrorEnvelope(string output, string expectedCode, string? expectedTool = null)
     {
         AssertNoTextPollution(output);
         using var doc = JsonDocument.Parse(output);
@@ -46,6 +50,7 @@ internal static class StructuredOutputAssertions
         Assert.Equal(OutputFormatting.SchemaVersion, root.GetProperty("schema_version").GetInt32());
         Assert.False(root.GetProperty("ok").GetBoolean(), $"Expected ok=false; envelope was: {output}");
         Assert.Equal(JsonValueKind.Null, root.GetProperty("data").ValueKind);
+        AssertToolField(root, expectedTool);
 
         var error = root.GetProperty("error");
         Assert.Equal(JsonValueKind.Object, error.ValueKind);
@@ -53,6 +58,17 @@ internal static class StructuredOutputAssertions
         var message = error.GetProperty("message").GetString();
         Assert.False(string.IsNullOrWhiteSpace(message), "error.message must be a non-empty plain-text string");
         AssertNoEmojiOrBoxDrawing(message!);
+    }
+
+    private static void AssertToolField(JsonElement root, string? expectedTool)
+    {
+        Assert.True(root.TryGetProperty("tool", out var toolEl), "Envelope must include 'tool' field.");
+        Assert.Equal(JsonValueKind.String, toolEl.ValueKind);
+        var tool = toolEl.GetString();
+        Assert.False(string.IsNullOrWhiteSpace(tool), "tool must be non-empty.");
+        Assert.StartsWith("koshi_", tool);
+        if (expectedTool is not null)
+            Assert.Equal(expectedTool, tool);
     }
 
     /// <summary>

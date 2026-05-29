@@ -29,7 +29,9 @@ public static class OutputErrorCodes
     public const string UnknownCorpus = "unknown_corpus";
     public const string AutoIndexFailed = "auto_index_failed";
     public const string InvalidFormat = "invalid_format";
+    public const string InvalidSplit = "invalid_split";
     public const string UnknownTeam = "unknown_team";
+    public const string InsufficientData = "insufficient_data";
     public const string EmptyStore = "empty_store";
     public const string NoMatchInScope = "no_match_in_scope";
     public const string NoMatchOfType = "no_match_of_type";
@@ -48,42 +50,112 @@ public static class OutputErrorCodes
 /// always wins over the env var so a human user can drop into text output even
 /// inside a JSON-default workspace.
 /// </para>
-/// <para>
-/// <strong>NOTE for Phase 1:</strong> the <c>KOSHI_OUTPUT_FORMAT</c> env var is intentionally NOT
-/// consulted yet — only the 5 high-value tools support JSON in this PR and
-/// honouring a global env var would mislead orchestrators about coverage.
-/// Phase 2 (issue #66 follow-up) adds <c>format</c> to the remaining 19 tools and
-/// turns the env var on.
-/// </para>
 /// </remarks>
 public static class OutputFormatting
 {
     public const int SchemaVersion = 1;
 
     /// <summary>
+    /// Environment variable consulted when no explicit <c>format</c> parameter
+    /// is passed to a tool. Accepted values: <c>text</c>, <c>json</c>
+    /// (case-insensitive). Anything else logs a one-shot warning to stderr at
+    /// first call and falls back to text.
+    /// </summary>
+    public const string FormatEnvVar = "KOSHI_OUTPUT_FORMAT";
+
+    private static readonly Lock _envLock = new();
+    private static bool _envDefaultLoaded;
+    private static OutputFormat _envDefault = OutputFormat.Text;
+    private static string? _envWarning;
+
+    /// <summary>
+    /// Test-only reset hook. Forces the env-var default to be re-read on the
+    /// next <see cref="Resolve(string?, out string?)"/> call. Production code
+    /// should never call this — the env default is intentionally cached so
+    /// tools see a stable choice for the process's lifetime.
+    /// </summary>
+    public static void ResetEnvDefaultForTesting()
+    {
+        lock (_envLock)
+        {
+            _envDefaultLoaded = false;
+            _envDefault = OutputFormat.Text;
+            _envWarning = null;
+        }
+    }
+
+    private static OutputFormat GetEnvDefault()
+    {
+        lock (_envLock)
+        {
+            if (_envDefaultLoaded) return _envDefault;
+            _envDefaultLoaded = true;
+
+            var raw = Environment.GetEnvironmentVariable(FormatEnvVar);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                _envDefault = OutputFormat.Text;
+                return _envDefault;
+            }
+
+            var trimmed = raw.Trim();
+            if (string.Equals(trimmed, "text", StringComparison.OrdinalIgnoreCase))
+            {
+                _envDefault = OutputFormat.Text;
+            }
+            else if (string.Equals(trimmed, "json", StringComparison.OrdinalIgnoreCase))
+            {
+                _envDefault = OutputFormat.Json;
+            }
+            else
+            {
+                _envDefault = OutputFormat.Text;
+                _envWarning = $"[koshi] ignoring invalid {FormatEnvVar}='{raw}'; expected 'text' or 'json'. Falling back to text.";
+                // Best-effort warning. Console.Error may be redirected/closed (e.g. detached
+                // stdio in some MCP hosts) — IOException must not propagate from Resolve().
+                try { Console.Error.WriteLine(_envWarning); }
+                catch (IOException) { /* stderr unavailable — swallow */ }
+                catch (ObjectDisposedException) { /* stderr disposed — swallow */ }
+            }
+
+            return _envDefault;
+        }
+    }
+
+    /// <summary>
+    /// Last warning emitted from the env-var parser, or <c>null</c> when the
+    /// env var was unset / valid. Exposed for tests.
+    /// </summary>
+    public static string? LastEnvWarningForTesting
+    {
+        get { lock (_envLock) return _envWarning; }
+    }
+
+    /// <summary>
     /// Resolve the effective <see cref="OutputFormat"/> for a tool call.
     /// </summary>
     /// <param name="formatParam">
     /// The user-supplied <c>format</c> argument. <c>null</c> / whitespace
-    /// means "no explicit choice — consult defaults". Recognised values
-    /// (case-insensitive, trimmed): <c>text</c>, <c>json</c>.
+    /// means "no explicit choice — consult <see cref="FormatEnvVar"/>".
+    /// Recognised values (case-insensitive, trimmed): <c>text</c>, <c>json</c>.
     /// </param>
     /// <param name="error">
     /// Populated with a descriptive error when <paramref name="formatParam"/>
     /// is non-null but unrecognised. <c>null</c> on success.
     /// </param>
     /// <returns>
-    /// The resolved format. Returns <see cref="OutputFormat.Text"/> on error
-    /// so the caller can choose to surface the error in text or JSON shape
-    /// depending on whether the input looked JSON-like.
+    /// The resolved format. Returns the env-var default when no explicit
+    /// param was passed. On unrecognised value: returns <see cref="OutputFormat.Text"/>
+    /// unless the input contains "json" (case-insensitive), in which case
+    /// returns <see cref="OutputFormat.Json"/> so the error envelope is
+    /// JSON-shaped for programmatic callers.
     /// </returns>
     public static OutputFormat Resolve(string? formatParam, out string? error)
     {
         error = null;
         if (string.IsNullOrWhiteSpace(formatParam))
         {
-            // Phase 2 will consult KOSHI_OUTPUT_FORMAT here.
-            return OutputFormat.Text;
+            return GetEnvDefault();
         }
 
         var trimmed = formatParam.Trim();
@@ -122,22 +194,24 @@ public static class OutputFormatting
                .Trim();
 
     /// <summary>
-    /// Serialize a success envelope <c>{ schema_version, ok:true, data, error:null }</c>.
+    /// Serialize a success envelope <c>{ schema_version, ok:true, tool, data, error:null }</c>.
     /// </summary>
-    public static string Ok<T>(T data, JsonTypeInfo<JsonEnvelope<T>> envelopeTypeInfo)
+    public static string Ok<T>(string tool, T data, JsonTypeInfo<JsonEnvelope<T>> envelopeTypeInfo)
     {
         var envelope = new JsonEnvelope<T>(
             SchemaVersion: SchemaVersion,
             Ok: true,
+            Tool: tool,
             Data: data,
             Error: null);
         return JsonSerializer.Serialize(envelope, envelopeTypeInfo);
     }
 
     /// <summary>
-    /// Serialize an error envelope <c>{ schema_version, ok:false, data:null, error:{code,message} }</c>.
+    /// Serialize an error envelope <c>{ schema_version, ok:false, tool, data:null, error:{code,message} }</c>.
     /// </summary>
     public static string Error<T>(
+        string tool,
         string code,
         string message,
         JsonTypeInfo<JsonEnvelope<T>> envelopeTypeInfo)
@@ -145,6 +219,7 @@ public static class OutputFormatting
         var envelope = new JsonEnvelope<T>(
             SchemaVersion: SchemaVersion,
             Ok: false,
+            Tool: tool,
             Data: default,
             Error: new JsonErrorDetail(code, message));
         return JsonSerializer.Serialize(envelope, envelopeTypeInfo);
@@ -156,11 +231,13 @@ public static class OutputFormatting
 /// </summary>
 /// <param name="SchemaVersion">Bumped when the envelope shape itself changes — not for per-tool data shape evolution. Always 1 today.</param>
 /// <param name="Ok">True for normal returns (including "no results" / "empty store"). False for validation failures, unknown resources, and internal errors.</param>
+/// <param name="Tool">Canonical MCP tool name (e.g. <c>koshi_search</c>). Useful for log aggregation and orchestrator routing.</param>
 /// <param name="Data">Per-tool typed payload. Null when <see cref="Ok"/> is false.</param>
 /// <param name="Error">Structured error info; null when <see cref="Ok"/> is true. Programmatic callers should switch on <see cref="JsonErrorDetail.Code"/>.</param>
 public sealed record JsonEnvelope<T>(
     int SchemaVersion,
     bool Ok,
+    string Tool,
     T? Data,
     JsonErrorDetail? Error);
 

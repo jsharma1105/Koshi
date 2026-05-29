@@ -55,7 +55,7 @@ public sealed class StructuredOutputToolTests : IDisposable
             corpus: CorpusName);
 
         var output = RetrievalTools.Search("apple", topK: 3, corpus: CorpusName, format: "json");
-        var data = AssertOkEnvelope(output);
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_search");
 
         Assert.Equal("apple", data.GetProperty("query").GetString());
         Assert.Equal(CorpusName, data.GetProperty("corpus").GetString());
@@ -91,7 +91,7 @@ public sealed class StructuredOutputToolTests : IDisposable
     {
         var output = RetrievalTools.Search(
             "anything", corpus: "no-such-corpus-12345", format: "json");
-        AssertErrorEnvelope(output, OutputErrorCodes.UnknownCorpus);
+        AssertErrorEnvelope(output, OutputErrorCodes.UnknownCorpus, expectedTool: "koshi_search");
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class StructuredOutputToolTests : IDisposable
     public void Recall_json_mode_empty_store_yields_ok_envelope_with_zero_total()
     {
         var output = MemoryTools.Recall("anything", format: "json");
-        var data = AssertOkEnvelope(output);
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_recall");
         Assert.Equal(0, data.GetProperty("total").GetInt32());
         Assert.Equal(JsonValueKind.Array, data.GetProperty("memories").ValueKind);
         Assert.Equal(0, data.GetProperty("memories").GetArrayLength());
@@ -139,7 +139,7 @@ public sealed class StructuredOutputToolTests : IDisposable
     public void Recall_json_mode_empty_query_yields_error_envelope()
     {
         var output = MemoryTools.Recall("   ", format: "json");
-        AssertErrorEnvelope(output, OutputErrorCodes.EmptyQuery);
+        AssertErrorEnvelope(output, OutputErrorCodes.EmptyQuery, expectedTool: "koshi_recall");
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public sealed class StructuredOutputToolTests : IDisposable
             userQuery: "What is the capital of France?",
             format: "json");
 
-        var data = AssertOkEnvelope(output);
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_compile_context");
 
         var metrics = data.GetProperty("metrics");
         Assert.True(metrics.GetProperty("total_tokens_used").GetInt32() >= 0);
@@ -213,7 +213,7 @@ public sealed class StructuredOutputToolTests : IDisposable
     public void Health_json_mode_returns_envelope_with_all_sections()
     {
         var output = DiagnosticTools.Health(format: "json");
-        var data = AssertOkEnvelope(output);
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_health");
 
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("version").GetString()));
         Assert.True(data.GetProperty("working_set_mb").GetInt64() >= 0);
@@ -278,7 +278,7 @@ public sealed class StructuredOutputToolTests : IDisposable
             issues: "verbose,slow",
             format: "json");
 
-        var data = AssertOkEnvelope(output);
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_score_turn");
 
         Assert.Equal("unknown-team-xyz", data.GetProperty("team_id").GetString());
         Assert.False(data.GetProperty("team_registered").GetBoolean());

@@ -17,9 +17,31 @@ public sealed class DiagnosticTools
 
     [McpServerTool(Name = "koshi_version"), Description(
         "WHEN TO CALL: When the user asks what version of Koshi is running, or before reporting a bug.\n" +
-        "WHAT IT DOES: Returns the Koshi MCP server version, .NET runtime, OS, process id, and start time.")]
-    public static string Version()
+        "WHAT IT DOES: Returns the Koshi MCP server version, .NET runtime, OS, process id, and start time. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
+    public static string Version(
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<VersionResultData>("koshi_version", OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeVersionResultData)
+                : "❌ " + fmtErr;
+
+        if (fmt == OutputFormat.Json)
+        {
+            var payload = new VersionResultData(
+                Version: _version.Value,
+                DotnetRuntime: Environment.Version.ToString(),
+                Os: Environment.OSVersion.ToString(),
+                ProcessId: Environment.ProcessId,
+                StartedAt: _startedAt);
+            return OutputFormatting.Ok("koshi_version", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeVersionResultData);
+        }
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Koshi MCP Server v{_version.Value}");
         sb.AppendLine($"  .NET runtime: {Environment.Version}");
@@ -43,7 +65,7 @@ public sealed class DiagnosticTools
         var fmt = OutputFormatting.Resolve(format, out var fmtErr);
         if (fmtErr is not null)
             return fmt == OutputFormat.Json
-                ? OutputFormatting.Error<HealthResultData>(OutputErrorCodes.InvalidFormat, fmtErr,
+                ? OutputFormatting.Error<HealthResultData>("koshi_health", OutputErrorCodes.InvalidFormat, fmtErr,
                     KoshiOutputJsonContext.Default.JsonEnvelopeHealthResultData)
                 : "❌ " + fmtErr;
 
@@ -252,7 +274,7 @@ public sealed class DiagnosticTools
             Teams: teams,
             Configuration: configuration);
 
-        return OutputFormatting.Ok(payload,
+        return OutputFormatting.Ok("koshi_health", payload,
             KoshiOutputJsonContext.Default.JsonEnvelopeHealthResultData);
     }
 
