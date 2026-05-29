@@ -1,5 +1,7 @@
 namespace Koshi.Mcp.Internal;
 
+using System.Diagnostics;
+
 /// <summary>
 /// Throttled progress reporter for <c>koshi_index_directory</c> (#69).
 ///
@@ -86,20 +88,7 @@ internal sealed class IndexProgressReporter
 
         foreach (var sink in _sinks)
         {
-            try
-            {
-                await sink.WriteAsync(ev, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // Per spec: never let a sink failure abort indexing. The MCP
-                // sink may, for example, throw on a closed transport — that's
-                // expected during graceful shutdown.
-            }
+            await SafeWriteAsync(sink, ev, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -126,9 +115,32 @@ internal sealed class IndexProgressReporter
 
         foreach (var sink in _sinks)
         {
-            try { await sink.WriteAsync(ev, cancellationToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) { throw; }
-            catch { }
+            await SafeWriteAsync(sink, ev, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Per spec: never let a sink failure abort indexing. The MCP sink may,
+    /// for example, throw on a closed transport during graceful shutdown.
+    /// Cancellation is intentionally re-thrown so the caller's cancellation
+    /// token contract is preserved.
+    /// </summary>
+    private static async ValueTask SafeWriteAsync(
+        IIndexProgressSink sink,
+        IndexProgressEvent ev,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await sink.WriteAsync(ev, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[koshi] index progress sink {sink.GetType().Name} failed: {ex.Message}");
         }
     }
 }
