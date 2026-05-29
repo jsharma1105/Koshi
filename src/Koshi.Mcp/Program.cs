@@ -21,6 +21,14 @@ if (args.Length > 0 && string.Equals(args[0], "config", StringComparison.Ordinal
     return ConfigCommand.Run(args[1..], Console.Out, Console.Error);
 }
 
+// Offline tool introspection (#67). Handled before the MCP host so the
+// process exits cleanly instead of hanging on stdin awaiting an
+// `initialize` request.
+if (ToolIntrospectCommand.ShouldHandle(args))
+{
+    return ToolIntrospectCommand.Run(args);
+}
+
 foreach (var arg in args)
 {
     switch (arg)
@@ -38,11 +46,14 @@ foreach (var arg in args)
             Console.WriteLine("tools for any LLM workflow. Speaks JSON-RPC over stdio.");
             Console.WriteLine();
             Console.WriteLine("Usage:");
-            Console.WriteLine("  koshi-mcp                Run the MCP server on stdio (default).");
-            Console.WriteLine("  koshi-mcp config <op>    Inspect/edit mcpServers.koshi.env per client.");
-            Console.WriteLine("                           Run 'koshi-mcp config --help' for details.");
-            Console.WriteLine("  koshi-mcp --version, -v  Print the version and exit.");
-            Console.WriteLine("  koshi-mcp --help, -h     Print this help and exit.");
+            Console.WriteLine("  koshi-mcp                    Run the MCP server on stdio (default).");
+            Console.WriteLine("  koshi-mcp config <op>        Inspect/edit mcpServers.koshi.env per client.");
+            Console.WriteLine("                               Run 'koshi-mcp config --help' for details.");
+            Console.WriteLine("  koshi-mcp --list-tools       List every MCP tool this server exposes.");
+            Console.WriteLine("  koshi-mcp --describe <tool>  Show full description + parameters for one tool.");
+            Console.WriteLine("                               Add --json to either flag for machine-readable output.");
+            Console.WriteLine("  koshi-mcp --version, -v      Print the version and exit.");
+            Console.WriteLine("  koshi-mcp --help, -h         Print this help and exit.");
             Console.WriteLine();
             Console.WriteLine("Documentation: https://github.com/jsharma1105/Koshi#readme");
             return 0;
