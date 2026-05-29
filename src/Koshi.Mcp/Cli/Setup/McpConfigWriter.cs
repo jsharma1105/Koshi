@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>Outcome of a single MCP-config registration attempt for one client.</summary>
 internal enum McpRegisterOutcome

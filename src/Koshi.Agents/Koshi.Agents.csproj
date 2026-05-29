@@ -40,18 +40,26 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Koshi.Mcp\Koshi.Mcp.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Both projects use top-level statements which both synthesise a global
+         `Program` class. When Koshi.Agents references Koshi.Mcp's assembly,
+         the C# compiler emits CS0436 noting the duplicate definition. The
+         conflict is benign because each Exe's own Program type wins for its
+         own entry point; suppress to keep the build warnings-clean. -->
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
     <PackageReference Include="Spectre.Console" Version="0.55.2" />
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
   </ItemGroup>
 
-  <!-- Embed the canonical persona files (single source of truth) as resources.
-       The .md files live under .github/copilot/agents/ and .claude/agents/ at
-       the repo root; this <Link> imports them without copying or duplicating. -->
-  <ItemGroup>
-    <EmbeddedResource Include="..\..\.github\copilot\agents\*.agent.md" LinkBase="Personas\copilot" />
-    <EmbeddedResource Include="..\..\.claude\agents\*.md" LinkBase="Personas\claude" />
-  </ItemGroup>
+  <!-- Persona resources are embedded into Koshi.Mcp; Koshi.Agents reads them
+       through PersonaCatalog (Koshi.Mcp.Cli.Setup) via project reference. -->
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

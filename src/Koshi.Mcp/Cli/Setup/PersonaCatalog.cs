@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>
 /// Represents a single persona shipped by the tool.

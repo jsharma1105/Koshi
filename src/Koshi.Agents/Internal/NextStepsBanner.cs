@@ -1,3 +1,4 @@
+using Koshi.Mcp.Cli.Setup;
 using Spectre.Console;
 
 namespace Koshi.Agents.Internal;

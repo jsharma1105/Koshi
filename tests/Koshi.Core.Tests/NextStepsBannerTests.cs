@@ -1,4 +1,5 @@
 using Koshi.Agents.Internal;
+using Koshi.Mcp.Cli.Setup;
 
 namespace Koshi.Core.Tests;
 

@@ -60,6 +60,16 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300" PrivateAssets="All" />
   </ItemGroup>
 
+  <!-- Embed the canonical persona files (single source of truth) as resources,
+       so `koshi-mcp init` / `koshi-mcp install-personas` can write them out
+       without depending on the Koshi.Agents companion tool. The .md files live
+       under .github/copilot/agents/ and .claude/agents/ at the repo root;
+       <Link> imports them without copying or duplicating. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\.github\copilot\agents\*.agent.md" LinkBase="Personas\copilot" />
+    <EmbeddedResource Include="..\..\.claude\agents\*.md" LinkBase="Personas\claude" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Condition="Exists('..\..\LICENSE')" />

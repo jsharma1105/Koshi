@@ -1,4 +1,4 @@
-namespace Koshi.Agents.Internal;
+namespace Koshi.Mcp.Cli.Setup;
 
 /// <summary>
 /// Resolves filesystem locations for client agent + MCP-config files across
