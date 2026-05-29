@@ -308,11 +308,13 @@ public sealed class PathConfigTests
             Directory.CreateDirectory(tmp);
             var externalMem = Path.Join(Path.GetTempPath(), $"koshi-extmem-{Guid.NewGuid():N}.json");
             var externalIdx = Path.Join(Path.GetTempPath(), $"koshi-extidx-{Guid.NewGuid():N}.json");
+            var externalTeams = Path.Join(Path.GetTempPath(), $"koshi-extteams-{Guid.NewGuid():N}.json");
 
             var cfg = new PathConfig(EnvFrom(new Dictionary<string, string?> {
                 ["KOSHI_PROJECT_ROOT"] = tmp,
                 ["KOSHI_MEMORY_FILE"] = externalMem,
-                ["KOSHI_INDEX_FILE"] = externalIdx
+                ["KOSHI_INDEX_FILE"] = externalIdx,
+                ["KOSHI_TEAMS_FILE"] = externalTeams
             }));
             cfg.EnsureStateDirGitIgnore();
 

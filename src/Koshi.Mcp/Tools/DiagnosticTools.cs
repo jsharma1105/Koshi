@@ -34,6 +34,7 @@ public sealed class DiagnosticTools
     {
         var indexStatus = RetrievalTools.GetStatus();
         var memStatus = MemoryTools.GetStatus();
+        var teamsStatus = TeamTools.GetStatus();
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"═══ Koshi Health (v{_version.Value}) ═══\n");
@@ -74,6 +75,17 @@ public sealed class DiagnosticTools
         }
         sb.AppendLine();
 
+        sb.AppendLine("  Teams:");
+        sb.AppendLine($"    Registered:  {teamsStatus.TeamCount}");
+        sb.AppendLine($"    Scores:      {teamsStatus.ScoreCount}");
+        sb.AppendLine($"    Feedback:    {teamsStatus.FeedbackCount}");
+        sb.AppendLine($"    Backend:     json");
+        sb.AppendLine($"    Persistence: {(teamsStatus.PersistenceEnabled ? "enabled" : "disabled")}");
+        sb.AppendLine($"    Location:    {teamsStatus.Path ?? "(in-memory only)"}");
+        sb.AppendLine($"    Last load:   {(teamsStatus.LastLoadError is null ? "ok" : "failed: " + teamsStatus.LastLoadError)}");
+        sb.AppendLine($"    Last save:   {(teamsStatus.LastSaveError is null ? "ok" : "failed: " + teamsStatus.LastSaveError)}");
+        sb.AppendLine();
+
         sb.AppendLine("  Configuration (resolved paths):");
         var paths = PathConfig.Default;
         sb.AppendLine($"    Project root:       {paths.ProjectRoot}  [{PathConfig.SourceLabel(paths.ProjectRootFromEnv)}]");
@@ -82,6 +94,7 @@ public sealed class DiagnosticTools
         sb.AppendLine($"    KOSHI_INDEX_FILE:   {paths.IndexFile}  [{PathConfig.SourceLabel(paths.IndexFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_MEMORY_FILE:  {paths.MemoryFile}  [{PathConfig.SourceLabel(paths.MemoryFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_MEMORY_VAULT: {paths.MemoryVault ?? "(unset)"}  [{(paths.MemoryVaultFromEnv ? "env" : "default")}]");
+        sb.AppendLine($"    KOSHI_TEAMS_FILE:   {paths.TeamsFile}  [{PathConfig.SourceLabel(paths.TeamsFileFromEnv)}]");
         sb.AppendLine($"    KOSHI_TOKENIZER_MODEL: {Koshi.Core.Tokenization.TokenCounters.ModelName}");
         var embedProvider = Koshi.Core.Retrieval.EmbeddingProviderRegistry.Current;
         if (embedProvider is null)
