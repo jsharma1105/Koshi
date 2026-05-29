@@ -137,7 +137,7 @@ public sealed class RetrievalTools
         "WHAT IT DOES: Chunks and BM25-indexes the documents under a corpus name. Replaces any prior " +
         "corpus of the same name. Only the default corpus is persisted via KOSHI_INDEX_FILE.\n" +
         "WHAT YOU GIVE IT: documents (JSON array of {content, source, type}); optional maxTokens / " +
-        "overlapTokens / corpus name.")]
+        "overlapTokens / corpus name. Pass format=\"json\" for a parseable envelope (#66).")]
     public static string Index(
         [Description("JSON array of documents: [{\"content\": \"...\", \"source\": \"filename.md\", \"type\": \"documentation\"}]")]
         string documents,
@@ -146,8 +146,15 @@ public sealed class RetrievalTools
         [Description("Optional chunker overlap between chunks (default 50, range 0-256, must be < maxTokens/2). Falls back to KOSHI_CHUNK_OVERLAP_TOKENS env var.")]
         int? overlapTokens = null,
         [Description("Optional named corpus to write into. Defaults to 'default'. Named corpora are in-memory only — only the default corpus is persisted via KOSHI_INDEX_FILE.")]
-        string? corpus = null)
+        string? corpus = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_index";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return IndexError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         List<DocInput>? docs;
         try
         {
@@ -155,11 +162,11 @@ public sealed class RetrievalTools
         }
         catch (JsonException ex)
         {
-            return $"❌ Invalid JSON: {ex.Message}";
+            return IndexError(fmt, OutputErrorCodes.InvalidJson, $"Invalid JSON: {ex.Message}");
         }
 
         if (docs is null || docs.Count == 0)
-            return "❌ No documents provided.";
+            return IndexError(fmt, OutputErrorCodes.NoDocuments, "No documents provided.");
 
         var cfg = ChunkerConfig.Resolve(maxTokens, overlapTokens);
         var chunker = new FixedSizeChunker(TokenCounters.Shared, cfg.MaxTokens, cfg.OverlapTokens);
@@ -172,10 +179,12 @@ public sealed class RetrievalTools
         }
 
         if (allChunks.Count > MaxChunks)
-            return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Reduce document count or size.";
+            return IndexError(fmt, OutputErrorCodes.TooManyChunks,
+                $"Too many chunks ({allChunks.Count} > {MaxChunks}). Reduce document count or size.");
 
         var corpusName = IsDefaultCorpus(corpus) ? DefaultCorpusName : corpus!.Trim();
-        if (IsDefaultCorpus(corpusName))
+        var isDefault = IsDefaultCorpus(corpusName);
+        if (isDefault)
         {
             ReplaceIndex(allChunks, source: ContentFingerprint.InMemorySource, enumeration: null);
         }
@@ -184,9 +193,34 @@ public sealed class RetrievalTools
             ReplaceNamedCorpus(corpusName, allChunks, source: ContentFingerprint.InMemorySource);
         }
 
+        if (fmt == OutputFormat.Json)
+        {
+            var data = new IndexResultData(
+                Corpus: corpusName,
+                IsNamedCorpus: !isDefault,
+                Documents: docs.Count,
+                Chunks: allChunks.Count,
+                Tokens: allChunks.Sum(c => c.TokenCount),
+                ChunkerMaxTokens: cfg.MaxTokens,
+                ChunkerOverlapTokens: cfg.OverlapTokens,
+                ChunkerWarning: cfg.Warning);
+            return OutputFormatting.Ok(
+                ToolName, data,
+                KoshiOutputJsonContext.Default.JsonEnvelopeIndexResultData);
+        }
+
         var msg = $"✅ Indexed {docs.Count} documents → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens) — {cfg.Describe()} [corpus={corpusName}]";
         if (cfg.Warning is not null) msg += $"\n   ⚠ {cfg.Warning}";
         return msg;
+    }
+
+    private static string IndexError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<IndexResultData>(
+                "koshi_index", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeIndexResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_index_directory"), Description(
@@ -199,7 +233,8 @@ public sealed class RetrievalTools
         "Streams '[indexing] N/M file (pct%, ETA)' progress on stderr (suppress with KOSHI_INDEX_VERBOSE=0) " +
         "and emits MCP notifications/progress when the client supplies a progressToken.\n" +
         "WHAT YOU GIVE IT: path (optional — defaults to $KOSHI_INDEX_PATH); pattern (optional glob); " +
-        "maxFileSizeKb (default 256); maxFiles (default 5000); optional chunker tuning; optional corpus.")]
+        "maxFileSizeKb (default 256); maxFiles (default 5000); optional chunker tuning; optional corpus. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
     public static async Task<string> IndexDirectory(
         [Description("Absolute directory path to index (defaults to $KOSHI_INDEX_PATH)")]
         string? path = null,
@@ -213,18 +248,26 @@ public sealed class RetrievalTools
         int? overlapTokens = null,
         [Description("Optional named corpus to write into. Defaults to 'default'. Named corpora are session-only — only the default corpus is persisted via KOSHI_INDEX_FILE.")]
         string? corpus = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null,
         RequestContext<CallToolRequestParams>? context = null,
         CancellationToken cancellationToken = default)
     {
+        const string ToolName = "koshi_index_directory";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return IndexDirectoryError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         var dirPath = ResolveIndexPath(path);
         if (dirPath is null)
         {
-            return "❌ No path provided and KOSHI_INDEX_PATH is not set. " +
-                   "Either pass an absolute path or set the KOSHI_INDEX_PATH environment variable in your MCP client config.";
+            return IndexDirectoryError(fmt, OutputErrorCodes.EmptyPath,
+                "No path provided and KOSHI_INDEX_PATH is not set. " +
+                "Either pass an absolute path or set the KOSHI_INDEX_PATH environment variable in your MCP client config.");
         }
 
         if (!Directory.Exists(dirPath))
-            return $"❌ Directory not found: {dirPath}";
+            return IndexDirectoryError(fmt, OutputErrorCodes.DirectoryNotFound, $"Directory not found: {dirPath}");
 
         if (maxFileSizeKb < 1) maxFileSizeKb = DefaultMaxFileSizeKb;
         if (maxFiles < 1) maxFiles = DefaultMaxFiles;
@@ -263,16 +306,18 @@ public sealed class RetrievalTools
         }
         catch (UnauthorizedAccessException ex)
         {
-            return $"❌ Access denied to directory: {ex.Message}";
+            return IndexDirectoryError(fmt, OutputErrorCodes.AccessDenied, $"Access denied to directory: {ex.Message}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException or ArgumentException)
         {
-            return $"❌ Failed to enumerate directory: {ex.Message}";
+            return IndexDirectoryError(fmt, OutputErrorCodes.IoError, $"Failed to enumerate directory: {ex.Message}");
         }
 
         var fileList = files.ToList();
         if (fileList.Count == 0)
-            return $"❌ No supported, readable files found in: {dirPath}";
+            return IndexDirectoryError(fmt, OutputErrorCodes.NoFiles, $"No supported, readable files found in: {dirPath}");
 
         var chunkerCfg = ChunkerConfig.Resolve(maxTokens, overlapTokens);
         var chunker = new FixedSizeChunker(TokenCounters.Shared, chunkerCfg.MaxTokens, chunkerCfg.OverlapTokens);
@@ -284,6 +329,10 @@ public sealed class RetrievalTools
 
         foreach (var file in fileList)
         {
+            // OperationCanceledException intentionally propagates out of the tool
+            // even in JSON mode: the MCP host treats OCE as cancellation
+            // (RequestCancellation), not as a tool response — so the envelope
+            // must NEVER be written for cancellation.
             cancellationToken.ThrowIfCancellationRequested();
             processed++;
             int chunkCountForFile = 0;
@@ -303,7 +352,8 @@ public sealed class RetrievalTools
                     allChunks.AddRange(chunks);
 
                     if (allChunks.Count > MaxChunks)
-                        return $"❌ Too many chunks ({allChunks.Count} > {MaxChunks}). Use a pattern filter to reduce scope.";
+                        return IndexDirectoryError(fmt, OutputErrorCodes.TooManyChunks,
+                            $"Too many chunks ({allChunks.Count} > {MaxChunks}). Use a pattern filter to reduce scope.");
                 }
             }
             catch (Exception ex) when (
@@ -326,24 +376,67 @@ public sealed class RetrievalTools
         }
 
         if (allChunks.Count == 0)
-            return "❌ All files were empty or unreadable.";
+            return IndexDirectoryError(fmt, OutputErrorCodes.AllEmpty, "All files were empty or unreadable.");
 
         var corpusName = IsDefaultCorpus(corpus) ? DefaultCorpusName : corpus!.Trim();
-        if (IsDefaultCorpus(corpusName))
+        var isDefault = IsDefaultCorpus(corpusName);
+        bool snapshotSaved;
+        if (isDefault)
         {
-            ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration);
+            snapshotSaved = ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration);
         }
         else
         {
             ReplaceNamedCorpus(corpusName, allChunks, source: dirPath);
+            snapshotSaved = false;
+        }
+
+        // snapshotSaved is now ground truth — true only when persistence is
+        // enabled AND the write actually succeeded. snapshotPath is reported
+        // whenever persistence is enabled (so the user knows where it would
+        // have gone even if the write failed and a stderr warning was logged).
+        var snapshotEligible = isDefault && _persistence.IsEnabled;
+        var snapshotPath = snapshotEligible ? _persistence.Path : null;
+
+        if (fmt == OutputFormat.Json)
+        {
+            var data = new IndexDirectoryResultData(
+                Corpus: corpusName,
+                IsNamedCorpus: !isDefault,
+                Path: dirPath,
+                Pattern: enumeration.Pattern,
+                MaxFileSizeKb: maxFileSizeKb,
+                MaxFiles: maxFiles,
+                FilesIndexed: fileList.Count - skipped,
+                FilesSkipped: skipped,
+                Chunks: allChunks.Count,
+                Tokens: allChunks.Sum(c => c.TokenCount),
+                ChunkerMaxTokens: chunkerCfg.MaxTokens,
+                ChunkerOverlapTokens: chunkerCfg.OverlapTokens,
+                ChunkerWarning: chunkerCfg.Warning,
+                SnapshotPath: snapshotPath,
+                SnapshotSaved: snapshotSaved);
+            return OutputFormatting.Ok(
+                ToolName, data,
+                KoshiOutputJsonContext.Default.JsonEnvelopeIndexDirectoryResultData);
         }
 
         var msg = $"✅ Indexed {fileList.Count - skipped} files from '{dirPath}' → {allChunks.Count} chunks ({allChunks.Sum(c => c.TokenCount)} tokens) — {chunkerCfg.Describe()} [corpus={corpusName}]";
         if (chunkerCfg.Warning is not null) msg += $"\n   ⚠ {chunkerCfg.Warning}";
         if (skipped > 0) msg += $" ({skipped} skipped)";
-        if (IsDefaultCorpus(corpusName) && _persistence.IsEnabled) msg += $"\n   Snapshot saved → {_persistence.Path}";
-        if (!IsDefaultCorpus(corpusName)) msg += "\n   (named corpus — not persisted to disk)";
+        if (snapshotSaved) msg += $"\n   Snapshot saved → {_persistence.Path}";
+        else if (snapshotEligible) msg += $"\n   ⚠ Snapshot write failed (see stderr) — index is in-memory only.";
+        if (!isDefault) msg += "\n   (named corpus — not persisted to disk)";
         return msg;
+    }
+
+    private static string IndexDirectoryError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<IndexDirectoryResultData>(
+                "koshi_index_directory", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeIndexDirectoryResultData)
+            : $"❌ {message}";
     }
 
     /// <summary>
@@ -449,8 +542,11 @@ public sealed class RetrievalTools
             // IndexDirectory was made async in #69 to support awaited progress
             // notifications; the synchronous auto-index path stays sync to keep
             // Search()'s public signature unchanged. ConfigureAwait(false) keeps
-            // the continuation off any captured context.
-            var auto = IndexDirectory(envPath).ConfigureAwait(false).GetAwaiter().GetResult();
+            // the continuation off any captured context. Force format:"text" so
+            // a global KOSHI_OUTPUT_FORMAT=json env var cannot turn the recursive
+            // call's response into a JSON envelope that the legacy '❌' StartsWith
+            // probe below would never recognise.
+            var auto = IndexDirectory(envPath, format: "text").ConfigureAwait(false).GetAwaiter().GetResult();
             if (auto.StartsWith('❌'))
             {
                 var failureMsg = "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
@@ -725,36 +821,114 @@ public sealed class RetrievalTools
         "WHEN TO CALL: When the user asks to switch projects, reset retrieval state, or drop a named " +
         "corpus. Default-corpus clear also removes the persisted snapshot.\n" +
         "WHAT IT DOES: Drops the named corpus (default if omitted) from memory. For the default corpus, " +
-        "also deletes the KOSHI_INDEX_FILE snapshot if set. Pass corpus='*' to clear everything.\n" +
+        "also deletes the KOSHI_INDEX_FILE snapshot if set. Pass corpus='*' to clear everything. " +
+        "Idempotent: clearing an unknown named corpus reports success with chunksRemoved=0.\n" +
         "WHAT YOU GIVE IT: corpus (optional — null/'default' for default + snapshot; '*' for all; name " +
-        "for a single named corpus).")]
+        "for a single named corpus). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string ClearIndex(
         [Description("Corpus to clear. 'default' (or null) clears the default corpus + snapshot; '*' clears all corpora; any other value clears that named corpus only.")]
-        string? corpus = null)
+        string? corpus = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_clear_index";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return ClearIndexError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.Equals(corpus?.Trim(), "*", StringComparison.Ordinal))
         {
-            // Clear default + all named.
-            var defaultResult = ClearDefaultCorpus();
-            var named = _extraCorpora.Keys.ToList();
-            foreach (var n in named) _extraCorpora.TryRemove(n, out _);
-            var msg = defaultResult;
-            if (named.Count > 0) msg += $"\n   Cleared {named.Count} named corpora: {string.Join(", ", named)}";
+            int defaultChunks;
+            bool snapshotDeleted;
+            (defaultChunks, snapshotDeleted) = ClearDefaultCorpusCore();
+            // Build the cleared list from successful TryRemove calls only —
+            // a concurrent caller racing on the same name should not get
+            // double-counted, and we never report a name we didn't actually
+            // remove.
+            var candidateNames = _extraCorpora.Keys.ToList();
+            var actuallyCleared = new List<string>(candidateNames.Count);
+            int namedChunkSum = 0;
+            foreach (var n in candidateNames)
+            {
+                if (_extraCorpora.TryRemove(n, out var removed))
+                {
+                    actuallyCleared.Add(n);
+                    namedChunkSum += removed.Chunks.Count;
+                }
+            }
+
+            if (fmt == OutputFormat.Json)
+            {
+                var data = new ClearIndexResultData(
+                    CorpusResolved: "*",
+                    Mode: "all",
+                    ChunksRemoved: defaultChunks + namedChunkSum,
+                    SnapshotDeleted: snapshotDeleted,
+                    SnapshotPath: snapshotDeleted ? _persistence.Path : null,
+                    NamedCorporaCleared: actuallyCleared);
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeClearIndexResultData);
+            }
+
+            var msg = FormatDefaultCleared(defaultChunks, snapshotDeleted);
+            if (actuallyCleared.Count > 0)
+                msg += $"\n   Cleared {actuallyCleared.Count} named corpora: {string.Join(", ", actuallyCleared)}";
             return msg;
         }
 
         if (!IsDefaultCorpus(corpus))
         {
             var name = corpus!.Trim();
-            return _extraCorpora.TryRemove(name, out var removed)
-                ? $"✅ Cleared named corpus '{name}' ({removed.Chunks.Count} chunks removed)."
-                : $"Corpus '{name}' was not indexed. Nothing to clear.";
+            var present = _extraCorpora.TryRemove(name, out var removed);
+            var removedCount = present ? removed!.Chunks.Count : 0;
+
+            if (fmt == OutputFormat.Json)
+            {
+                var data = new ClearIndexResultData(
+                    CorpusResolved: name,
+                    Mode: "named",
+                    ChunksRemoved: removedCount,
+                    SnapshotDeleted: false,
+                    SnapshotPath: null,
+                    NamedCorporaCleared: present ? new List<string> { name } : new List<string>());
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeClearIndexResultData);
+            }
+
+            return present
+                ? $"✅ Cleared named corpus '{name}' ({removedCount} chunks removed)."
+                : $"✅ Named corpus '{name}' was not indexed — nothing to clear.";
         }
 
-        return ClearDefaultCorpus();
+        var (chunks, snapshotDeletedDefault) = ClearDefaultCorpusCore();
+        if (fmt == OutputFormat.Json)
+        {
+            var data = new ClearIndexResultData(
+                CorpusResolved: "default",
+                Mode: "default",
+                ChunksRemoved: chunks,
+                SnapshotDeleted: snapshotDeletedDefault,
+                SnapshotPath: snapshotDeletedDefault ? _persistence.Path : null,
+                NamedCorporaCleared: new List<string>());
+            return OutputFormatting.Ok(
+                ToolName, data,
+                KoshiOutputJsonContext.Default.JsonEnvelopeClearIndexResultData);
+        }
+        return FormatDefaultCleared(chunks, snapshotDeletedDefault);
     }
 
-    private static string ClearDefaultCorpus()
+    private static string ClearIndexError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<ClearIndexResultData>(
+                "koshi_clear_index", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeClearIndexResultData)
+            : $"❌ {message}";
+    }
+
+    private static (int chunksRemoved, bool snapshotDeleted) ClearDefaultCorpusCore()
     {
         int previousCount;
         lock (_lock)
@@ -777,9 +951,16 @@ public sealed class RetrievalTools
             _lastAutoIndexFailureMessage = null;
         }
 
-        var deletedSnapshot = _persistence.IsEnabled && File.Exists(_persistence.Path!);
-        _persistence.Delete();
+        // _persistence.Delete returns the ground-truth result (true iff a
+        // file was actually removed). Prior code did a pre-delete
+        // File.Exists() probe which raced with concurrent deletion and could
+        // mis-report.
+        var deletedSnapshot = _persistence.Delete();
+        return (previousCount, deletedSnapshot);
+    }
 
+    private static string FormatDefaultCleared(int previousCount, bool deletedSnapshot)
+    {
         if (previousCount == 0 && !deletedSnapshot)
             return "Default corpus already empty.";
 
@@ -788,6 +969,12 @@ public sealed class RetrievalTools
             : "✅ Cleared default corpus (in-memory was already empty).";
         if (deletedSnapshot) msg += $"\n   Snapshot deleted → {_persistence.Path}";
         return msg;
+    }
+
+    private static string ClearDefaultCorpus()
+    {
+        var (chunks, snapshotDeleted) = ClearDefaultCorpusCore();
+        return FormatDefaultCleared(chunks, snapshotDeleted);
     }
 
     internal static (
@@ -998,7 +1185,15 @@ public sealed class RetrievalTools
         return true;
     }
 
-    private static void ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration)
+    /// <summary>
+    /// Replaces the default in-memory corpus and (if persistence is enabled)
+    /// writes a new snapshot to disk. Returns the snapshot-write result
+    /// (<c>true</c>=persisted; <c>false</c>=disabled OR write failed).
+    /// Tool envelopes that report <c>snapshot_saved</c> must rely on this
+    /// return value, not on <c>_persistence.IsEnabled</c> alone — IO can
+    /// fail and the user deserves an honest answer.
+    /// </summary>
+    private static bool ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration)
     {
         var retriever = new KeywordRetriever();
         retriever.Index(chunks);
@@ -1024,7 +1219,7 @@ public sealed class RetrievalTools
             _lastAutoIndexFailureMessage = null;
         }
 
-        _persistence.Save(source, fingerprint, enumeration, chunks);
+        return _persistence.Save(source, fingerprint, enumeration, chunks);
     }
 
     /// <summary>

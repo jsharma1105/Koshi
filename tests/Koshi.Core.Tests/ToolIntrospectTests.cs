@@ -142,6 +142,18 @@ public sealed class ToolIntrospectTests
     [InlineData("koshi_team_dashboard")]
     [InlineData("koshi_analyze_feedback")]
     [InlineData("koshi_list_teams")]
+    // Phase 2b mutation/persistence tools (issue #66).
+    [InlineData("koshi_remember")]
+    [InlineData("koshi_forget")]
+    [InlineData("koshi_clear_memories")]
+    [InlineData("koshi_capture_turn")]
+    [InlineData("koshi_memory_export_to_vault")]
+    [InlineData("koshi_memory_import_from_vault")]
+    [InlineData("koshi_memory_sync_vault")]
+    [InlineData("koshi_index")]
+    [InlineData("koshi_index_directory")]
+    [InlineData("koshi_clear_index")]
+    [InlineData("koshi_register_team")]
     public void Structured_output_wired_tools_expose_optional_format_parameter(string toolName)
     {
         // Anti-regression for #66: every tool wired with a structured-output
@@ -217,12 +229,13 @@ public sealed class ToolIntrospectTests
         Assert.DoesNotContain("cancellationToken", paramNames);
         Assert.DoesNotContain("server", paramNames);
 
-        // The user-facing surface must remain exactly these seven params.
+        // The user-facing surface must remain exactly these eight params
+        // (format added by Phase 2b structured-output wiring, issue #66).
         Assert.Equal(
             new[]
             {
                 "path", "pattern", "maxFileSizeKb", "maxFiles",
-                "maxTokens", "overlapTokens", "corpus",
+                "maxTokens", "overlapTokens", "corpus", "format",
             },
             paramNames);
     }

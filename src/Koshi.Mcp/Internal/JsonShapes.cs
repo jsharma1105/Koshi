@@ -307,4 +307,150 @@ internal static class JsonShapes
         string CurrentValue,
         string SuggestedValue,
         string Reason);
+
+    // ═══════════════════════════ Phase 2b ════════════════════════════════
+    // Mutation / persistence tools. All DTOs expose the canonical inputs +
+    // post-condition state so callers can verify the mutation landed without
+    // re-querying. <c>persistence_warning</c> fields are nullable strings —
+    // populated only when the write succeeded but persistence is degraded
+    // (e.g. in-process-only store, partial vault flush).
+
+    // ─────────────────────────── koshi_remember ──────────────────────────
+
+    public sealed record RememberResultData(
+        string Id,
+        string Type,
+        string Subject,
+        ScopeData Scope,
+        string Source,
+        double Confidence,
+        DateTimeOffset CreatedAt,
+        bool Embedded,
+        string? EmbeddingModel,
+        int EmbeddingDimensions,
+        string? EmbedNote,
+        bool PersistenceEnabled,
+        string? PersistenceWarning);
+
+    // ─────────────────────────── koshi_forget ────────────────────────────
+
+    public sealed record ForgetResultData(
+        string Subject,
+        int Removed,
+        List<string> DeletedIds);
+
+    // ─────────────────────── koshi_clear_memories ────────────────────────
+
+    public sealed record ClearMemoriesResultData(
+        bool Confirmed,
+        int Removed);
+
+    // ─────────────────────── koshi_capture_turn ──────────────────────────
+
+    public sealed record CaptureTurnResultData(
+        bool AutoPromoted,
+        int CandidatesExtracted,
+        List<CaptureSavedEntry> Saved,
+        List<CaptureSkippedEntry> Skipped,
+        List<CaptureCandidateEntry> Candidates,
+        ScopeData Scope,
+        string? Reason,
+        string? PersistenceWarning);
+
+    public sealed record CaptureSavedEntry(
+        string Id,
+        string Subject,
+        double Confidence,
+        string MatchedPattern);
+
+    public sealed record CaptureSkippedEntry(
+        string Subject,
+        string Reason);
+
+    public sealed record CaptureCandidateEntry(
+        string Subject,
+        string Body,
+        double Confidence,
+        string MatchedPattern);
+
+    // ──────────────────── koshi_memory_export_to_vault ───────────────────
+
+    public sealed record ExportToVaultResultData(
+        string VaultPath,
+        string Flavor,
+        int Exported);
+
+    // ─────────────────── koshi_memory_import_from_vault ──────────────────
+
+    public sealed record ImportFromVaultResultData(
+        string VaultPath,
+        string Mode,
+        int Prior,
+        int Incoming,
+        int Added,
+        int Replaced,
+        int Kept);
+
+    // ─────────────────────── koshi_memory_sync_vault ─────────────────────
+
+    public sealed record SyncVaultResultData(
+        string Backend,
+        bool Synced,
+        int Count,
+        string? Reason);
+
+    // ─────────────────────────── koshi_index ─────────────────────────────
+
+    public sealed record IndexResultData(
+        string Corpus,
+        bool IsNamedCorpus,
+        int Documents,
+        int Chunks,
+        int Tokens,
+        int ChunkerMaxTokens,
+        int ChunkerOverlapTokens,
+        string? ChunkerWarning);
+
+    // ─────────────────────── koshi_index_directory ───────────────────────
+
+    public sealed record IndexDirectoryResultData(
+        string Corpus,
+        bool IsNamedCorpus,
+        string Path,
+        string? Pattern,
+        int MaxFileSizeKb,
+        int MaxFiles,
+        int FilesIndexed,
+        int FilesSkipped,
+        int Chunks,
+        int Tokens,
+        int ChunkerMaxTokens,
+        int ChunkerOverlapTokens,
+        string? ChunkerWarning,
+        string? SnapshotPath,
+        bool SnapshotSaved);
+
+    // ───────────────────────── koshi_clear_index ─────────────────────────
+
+    public sealed record ClearIndexResultData(
+        string CorpusResolved,
+        string Mode,
+        int ChunksRemoved,
+        bool SnapshotDeleted,
+        string? SnapshotPath,
+        List<string> NamedCorporaCleared);
+
+    // ──────────────────────── koshi_register_team ────────────────────────
+
+    public sealed record RegisterTeamResultData(
+        string TeamId,
+        string Name,
+        string Description,
+        string Operation,
+        int ContextBudgetTokens,
+        int RetrievalTopK,
+        double QualityTarget,
+        bool HasSystemPrompt,
+        bool HasTeamContext,
+        string? PersistenceWarning);
 }

@@ -104,7 +104,8 @@ public sealed class TeamTools
         "WHAT IT DOES: Persists a TeamProfile so koshi_score_turn / koshi_team_dashboard / " +
         "koshi_analyze_feedback can attribute scores and metrics to this team across restarts.\n" +
         "WHAT YOU GIVE IT: teamId + name (required); description; tokenBudget (default 8192); topK " +
-        "(default 5); qualityTarget (0-1, default 0.7); systemPrompt; teamContext (cacheable).")]
+        "(default 5); qualityTarget (0-1, default 0.7); systemPrompt; teamContext (cacheable). " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
     public static string RegisterTeam(
         [Description("Unique team identifier (e.g., 'platform-team')")] string teamId,
         [Description("Team display name")] string name,
@@ -113,8 +114,29 @@ public sealed class TeamTools
         [Description("Retrieval TopK (default: 5)")] int topK = 5,
         [Description("Quality target 0-1 (default: 0.7)")] float qualityTarget = 0.7f,
         [Description("Custom system prompt")] string? systemPrompt = null,
-        [Description("Team conventions/context (cacheable)")] string? teamContext = null)
+        [Description("Team conventions/context (cacheable)")] string? teamContext = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_register_team";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
+        if (string.IsNullOrWhiteSpace(teamId))
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam, "teamId must not be empty.");
+        if (string.IsNullOrWhiteSpace(name))
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam, "name must not be empty.");
+        if (tokenBudget <= 0)
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam,
+                $"tokenBudget must be > 0 (got {tokenBudget}).");
+        if (topK <= 0)
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam,
+                $"topK must be > 0 (got {topK}).");
+        if (float.IsNaN(qualityTarget) || qualityTarget < 0f || qualityTarget > 1f)
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam,
+                $"qualityTarget must be in [0.0, 1.0] (got {qualityTarget}).");
+
         try
         {
             var team = new TeamProfile
@@ -132,15 +154,49 @@ public sealed class TeamTools
                 },
             };
 
-            _registry.Register(team);
+            // Upsert lets re-registration replace the profile while keeping
+            // accumulated quality history — matches the tool's "subsequent
+            // calls update" contract documented in the WHEN block above.
+            var existed = _registry.Upsert(team);
+
+            var warning = PersistenceWarning();
+            var operation = existed ? "updated" : "created";
+
+            if (fmt == OutputFormat.Json)
+            {
+                var data = new RegisterTeamResultData(
+                    TeamId: teamId,
+                    Name: name,
+                    Description: description ?? "",
+                    Operation: operation,
+                    ContextBudgetTokens: tokenBudget,
+                    RetrievalTopK: topK,
+                    QualityTarget: qualityTarget,
+                    HasSystemPrompt: !string.IsNullOrEmpty(systemPrompt),
+                    HasTeamContext: !string.IsNullOrEmpty(teamContext),
+                    PersistenceWarning: warning);
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeRegisterTeamResultData);
+            }
+
             return AppendWarning(
                 $"✅ Registered team '{name}' (id: {teamId}, budget: {tokenBudget}, topK: {topK}, target: {qualityTarget:P0})",
-                PersistenceWarning());
+                warning);
         }
         catch (InvalidOperationException ex)
         {
-            return $"❌ {ex.Message}";
+            return RegisterTeamError(fmt, OutputErrorCodes.InvalidTeam, ex.Message);
         }
+    }
+
+    private static string RegisterTeamError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<RegisterTeamResultData>(
+                "koshi_register_team", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeRegisterTeamResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_score_turn"), Description(

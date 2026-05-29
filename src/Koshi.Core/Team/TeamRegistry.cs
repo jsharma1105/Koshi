@@ -59,6 +59,34 @@ public sealed class TeamRegistry
         NotifyChanged();
     }
 
+    /// <summary>
+    /// Insert a new team or replace the existing record for the same teamId,
+    /// preserving any accumulated <see cref="QualityScore"/> /
+    /// <see cref="QualityFeedback"/> / <see cref="TurnMetrics"/> history.
+    /// Returns <c>true</c> when an existing team was replaced, <c>false</c>
+    /// for a fresh insert. Matches the
+    /// <c>koshi_register_team</c> tool semantics "Once per team — subsequent
+    /// calls update": resending a registration must not lose accumulated
+    /// quality data.
+    /// </summary>
+    public bool Upsert(TeamProfile team)
+    {
+        // Use ConcurrentDictionary.AddOrUpdate so the existed-flag and the
+        // mutation are observed under the same internal lock — a prior
+        // ContainsKey + assign sequence could report "false" for two
+        // concurrent first-registrations.
+        bool existed = false;
+        _teams.AddOrUpdate(
+            team.TeamId,
+            addValueFactory: _ => team,
+            updateValueFactory: (_, _) => { existed = true; return team; });
+        _feedback.TryAdd(team.TeamId, []);
+        _scores.TryAdd(team.TeamId, []);
+        _metrics.TryAdd(team.TeamId, []);
+        NotifyChanged();
+        return existed;
+    }
+
     /// <summary>Get a team by ID.</summary>
     public TeamProfile? GetTeam(string teamId) =>
         _teams.GetValueOrDefault(teamId);

@@ -71,9 +71,18 @@ internal sealed class IndexPersistence
         }
     }
 
-    public void Save(string? sourcePath, string? contentFingerprint, IndexEnumerationParams? enumeration, IReadOnlyList<Chunk> chunks)
+    /// <summary>
+    /// Persists <paramref name="chunks"/> to <see cref="Path"/>. Returns
+    /// <c>true</c> when persistence is enabled and the write succeeded;
+    /// <c>false</c> when persistence is disabled (no-op) or the IO failed
+    /// (error logged to stderr, never throws — callers depend on Save being
+    /// best-effort so an unwritable snapshot path doesn't block indexing).
+    /// Callers that need to report post-condition state to users should
+    /// only claim "saved" when this returns <c>true</c>.
+    /// </summary>
+    public bool Save(string? sourcePath, string? contentFingerprint, IndexEnumerationParams? enumeration, IReadOnlyList<Chunk> chunks)
     {
-        if (Path is null) return;
+        if (Path is null) return false;
 
         try
         {
@@ -95,6 +104,7 @@ internal sealed class IndexPersistence
             var tempPath = Path + ".tmp";
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, Path, overwrite: true);
+            return true;
         }
         catch (Exception ex) when (
             ex is IOException
@@ -104,16 +114,25 @@ internal sealed class IndexPersistence
             or JsonException)
         {
             Console.Error.WriteLine($"[koshi] Failed to save index file '{Path}': {ex.Message}");
+            return false;
         }
     }
 
-    /// <summary>Deletes the snapshot file. No-op when persistence is disabled or the file is absent.</summary>
-    public void Delete()
+    /// <summary>
+    /// Deletes the snapshot file. Returns <c>true</c> when a file was
+    /// actually removed; <c>false</c> when persistence is disabled, the file
+    /// was already absent, or the delete failed (error logged to stderr,
+    /// never throws). Callers that need to report "snapshot_deleted" to
+    /// users should rely on this return value, not a pre-delete existence
+    /// check (which races with concurrent deletion).
+    /// </summary>
+    public bool Delete()
     {
-        if (Path is null || !File.Exists(Path)) return;
+        if (Path is null || !File.Exists(Path)) return false;
         try
         {
             File.Delete(Path);
+            return true;
         }
         catch (Exception ex) when (
             ex is UnauthorizedAccessException ||
@@ -123,6 +142,7 @@ internal sealed class IndexPersistence
             ex is ArgumentException)
         {
             Console.Error.WriteLine($"[koshi] Failed to delete index file '{Path}': {ex.Message}");
+            return false;
         }
     }
 }

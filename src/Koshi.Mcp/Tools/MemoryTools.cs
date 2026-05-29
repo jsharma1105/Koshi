@@ -65,7 +65,7 @@ public sealed class MemoryTools
         "KOSHI_MEMORY_VAULT).\n" +
         "WHAT YOU GIVE IT: content + subject (required); type (Fact|Decision|Pattern|Preference); " +
         "confidence 0-1; source; scope filters (userId/workspaceId/threadId — '*' or empty means " +
-        "globally visible).")]
+        "globally visible). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string Remember(
         [Description("The content to remember")] string content,
         [Description("Subject/topic of this memory")] string subject,
@@ -80,12 +80,19 @@ public sealed class MemoryTools
         [Description("Optional thread identifier for conversation-scoped memories.")]
         string? threadId = null,
         [Description("If true and an IEmbeddingProvider is registered (see koshi_health), embed the content and store the vector alongside the memory for future hybrid recall. Default: false. No-op when no provider is configured.")]
-        bool embedSelf = false)
+        bool embedSelf = false,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_remember";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return RememberError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(content))
-            return "❌ Content must not be empty.";
+            return RememberError(fmt, OutputErrorCodes.EmptyContent, "Content must not be empty.");
         if (string.IsNullOrWhiteSpace(subject))
-            return "❌ Subject must not be empty.";
+            return RememberError(fmt, OutputErrorCodes.EmptySubject, "Subject must not be empty.");
 
         confidence = Math.Clamp(confidence, 0f, 1f);
         var memType = Enum.TryParse<MemoryType>(type, true, out var mt) ? mt : MemoryType.Fact;
@@ -125,10 +132,17 @@ public sealed class MemoryTools
 
         try
         {
-            return _store.WithFreshState(memories =>
+            string? capturedId = null;
+            DateTimeOffset capturedAt = default;
+            var output = _store.WithFreshState(memories =>
             {
                 if (memories.Count >= MaxMemories)
-                    return $"❌ Memory limit reached ({MaxMemories}). Use koshi_forget to free space.";
+                {
+                    return fmt == OutputFormat.Json
+                        ? RememberError(fmt, OutputErrorCodes.MemoryLimitReached,
+                            $"Memory limit reached ({MaxMemories}). Use koshi_forget to free space.")
+                        : $"❌ Memory limit reached ({MaxMemories}). Use koshi_forget to free space.";
+                }
 
                 var record = new MemoryRecord
                 {
@@ -146,6 +160,32 @@ public sealed class MemoryTools
 
                 memories.Add(record);
                 _store.Upsert(record);
+                capturedId = record.Id;
+                capturedAt = record.CreatedAt;
+
+                if (fmt == OutputFormat.Json)
+                {
+                    var persistenceWarning = _store.Backend.IsEnabled
+                        ? null
+                        : "Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
+                    var data = new RememberResultData(
+                        Id: record.Id,
+                        Type: memType.ToString(),
+                        Subject: subject,
+                        Scope: new ScopeData(scope.UserId, scope.WorkspaceId, scope.ThreadId),
+                        Source: source,
+                        Confidence: confidence,
+                        CreatedAt: record.CreatedAt,
+                        Embedded: embedding is not null,
+                        EmbeddingModel: embeddingModel,
+                        EmbeddingDimensions: embeddingDims,
+                        EmbedNote: embedNote,
+                        PersistenceEnabled: _store.Backend.IsEnabled,
+                        PersistenceWarning: persistenceWarning);
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeRememberResultData);
+                }
 
                 var preview = content.Length > 80 ? content[..80] + "..." : content;
                 var scopeLabel = scope.UserId == "*"
@@ -161,11 +201,26 @@ public sealed class MemoryTools
                     msg += "\n   ⚠ Persistence is disabled — memory is in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist across restarts.";
                 return msg;
             });
+            return output;
         }
         catch (MemoryPersistenceException ex)
         {
-            return FormatPersistenceFailure("koshi_remember", ex);
+            if (fmt == OutputFormat.Json)
+                return OutputFormatting.Error<RememberResultData>(
+                    ToolName, OutputErrorCodes.PersistenceFailed,
+                    PersistenceFailureDetail(ex),
+                    KoshiOutputJsonContext.Default.JsonEnvelopeRememberResultData);
+            return FormatPersistenceFailure(ToolName, ex);
         }
+    }
+
+    private static string RememberError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<RememberResultData>(
+                "koshi_remember", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeRememberResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_recall"), Description(
@@ -476,13 +531,22 @@ public sealed class MemoryTools
         "(e.g., 'forget what I said about Postgres', 'we don't use that pattern anymore'). NEVER call " +
         "unprompted — memory is meant to persist.\n" +
         "WHAT IT DOES: Removes all memories matching the given subject (case-insensitive substring " +
-        "match). Returns the count removed and a deletedIds list.\n" +
-        "WHAT YOU GIVE IT: subject (required — substring of the memory's subject field).")]
+        "match). Returns the count removed and a deletedIds list. Idempotent: returns ok=true with " +
+        "removed=0 when nothing matches.\n" +
+        "WHAT YOU GIVE IT: subject (required — substring of the memory's subject field). Pass " +
+        "format=\"json\" for a parseable envelope (#66).")]
     public static string Forget(
-        [Description("Subject to forget (case-insensitive match)")] string subject)
+        [Description("Subject to forget (case-insensitive match)")] string subject,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_forget";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return ForgetError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(subject))
-            return "❌ Subject must not be empty.";
+            return ForgetError(fmt, OutputErrorCodes.EmptySubject, "Subject must not be empty.");
 
         try
         {
@@ -491,31 +555,72 @@ public sealed class MemoryTools
                 var toRemove = memories
                     .Where(m => m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                if (toRemove.Count == 0)
-                    return $"No memories found with subject '{subject}'.";
 
                 foreach (var rec in toRemove) memories.Remove(rec);
                 foreach (var rec in toRemove) _store.Delete(rec.Id);
 
+                if (fmt == OutputFormat.Json)
+                {
+                    var data = new ForgetResultData(
+                        Subject: subject,
+                        Removed: toRemove.Count,
+                        DeletedIds: toRemove.Select(r => r.Id).ToList());
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeForgetResultData);
+                }
+
+                if (toRemove.Count == 0)
+                    return $"No memories found with subject '{subject}'.";
                 return $"✅ Forgot {toRemove.Count} memory(ies) about '{subject}'.";
             });
         }
         catch (MemoryPersistenceException ex)
         {
-            return FormatPersistenceFailure("koshi_forget", ex);
+            if (fmt == OutputFormat.Json)
+                return OutputFormatting.Error<ForgetResultData>(
+                    ToolName, OutputErrorCodes.PersistenceFailed,
+                    PersistenceFailureDetail(ex),
+                    KoshiOutputJsonContext.Default.JsonEnvelopeForgetResultData);
+            return FormatPersistenceFailure(ToolName, ex);
         }
+    }
+
+    private static string ForgetError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<ForgetResultData>(
+                "koshi_forget", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeForgetResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_clear_memories"), Description(
         "WHEN TO CALL: Only when the user explicitly asks to wipe all memory (e.g., switching projects, " +
         "resetting state). Two-step: requires confirm=true on the second call. NEVER call as cleanup.\n" +
-        "WHAT IT DOES: Deletes every stored memory after the confirmation guard.\n" +
-        "WHAT YOU GIVE IT: confirm=true to actually clear; first call without it returns a warning.")]
+        "WHAT IT DOES: Deletes every stored memory after the confirmation guard. Idempotent — clearing " +
+        "an empty store returns ok=true with removed=0.\n" +
+        "WHAT YOU GIVE IT: confirm=true to actually clear; first call without it returns confirmation_required. " +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
     public static string ClearMemories(
-        [Description("Set to true to confirm deletion of all memories")] bool confirm = false)
+        [Description("Set to true to confirm deletion of all memories")] bool confirm = false,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_clear_memories";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return ClearMemoriesError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (!confirm)
-            return "⚠️ This will delete ALL memories. Re-call with confirm=true to proceed.";
+        {
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<ClearMemoriesResultData>(
+                    ToolName, OutputErrorCodes.ConfirmationRequired,
+                    "This will delete ALL memories. Re-call with confirm=true to proceed.",
+                    KoshiOutputJsonContext.Default.JsonEnvelopeClearMemoriesResultData)
+                : "⚠️ This will delete ALL memories. Re-call with confirm=true to proceed.";
+        }
 
         try
         {
@@ -523,6 +628,17 @@ public sealed class MemoryTools
             {
                 int removed = memories.Count;
                 _store.ReplaceAll([]);
+
+                if (fmt == OutputFormat.Json)
+                {
+                    var data = new ClearMemoriesResultData(
+                        Confirmed: true,
+                        Removed: removed);
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeClearMemoriesResultData);
+                }
+
                 return removed == 0
                     ? "Memory store already empty."
                     : $"✅ Cleared {removed} memory(ies).";
@@ -530,8 +646,22 @@ public sealed class MemoryTools
         }
         catch (MemoryPersistenceException ex)
         {
-            return FormatPersistenceFailure("koshi_clear_memories", ex);
+            if (fmt == OutputFormat.Json)
+                return OutputFormatting.Error<ClearMemoriesResultData>(
+                    ToolName, OutputErrorCodes.PersistenceFailed,
+                    PersistenceFailureDetail(ex),
+                    KoshiOutputJsonContext.Default.JsonEnvelopeClearMemoriesResultData);
+            return FormatPersistenceFailure(ToolName, ex);
         }
+    }
+
+    private static string ClearMemoriesError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<ClearMemoriesResultData>(
+                "koshi_clear_memories", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeClearMemoriesResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_memory_export_to_vault"), Description(
@@ -541,14 +671,21 @@ public sealed class MemoryTools
         "WHAT IT DOES: Writes all current memories as markdown files under <vaultPath>/koshi/<type>/. " +
         "Refuses non-empty vaults unless overwrite=true (user notes without koshi.id are never touched).\n" +
         "WHAT YOU GIVE IT: vaultPath (required); overwrite (default false); flavor " +
-        "(obsidian|foam|logseq|dendron, default obsidian).")]
+        "(obsidian|foam|logseq|dendron, default obsidian). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string ExportToVault(
         [Description("Path to the target vault directory")] string vaultPath,
         [Description("If true, replace existing koshi-tagged files in the vault")] bool overwrite = false,
-        [Description("Layout flavor for the target vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian")
+        [Description("Layout flavor for the target vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian",
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_memory_export_to_vault";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return ExportError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(vaultPath))
-            return "❌ vaultPath must not be empty.";
+            return ExportError(fmt, OutputErrorCodes.EmptyPath, "vaultPath must not be empty.");
 
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
         var layout = VaultLayout.Resolve(flavor);
@@ -558,28 +695,61 @@ public sealed class MemoryTools
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or SecurityException
                 or ArgumentException or NotSupportedException or PathTooLongException)
-        { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
+        { return ExportError(fmt, OutputErrorCodes.VaultOpenFailed, $"Could not open vault '{resolved}': {ex.Message}"); }
 
         using (target)
         {
             var existing = target.LoadAll();
             if (existing.Count > 0 && !overwrite)
-                return $"❌ Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
-                       "Pass overwrite=true to replace them.";
+            {
+                return fmt == OutputFormat.Json
+                    ? OutputFormatting.Error<ExportToVaultResultData>(
+                        ToolName, OutputErrorCodes.VaultNotEmpty,
+                        $"Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
+                        "Pass overwrite=true to replace them.",
+                        KoshiOutputJsonContext.Default.JsonEnvelopeExportToVaultResultData)
+                    : $"❌ Vault already contains {existing.Count} managed memories at '{target.Location}'. " +
+                      "Pass overwrite=true to replace them.";
+            }
 
             var snapshot = _store.WithFreshState(memories => memories.ToList());
             try
             {
                 target.ReplaceAll(snapshot);
+
+                if (fmt == OutputFormat.Json)
+                {
+                    var data = new ExportToVaultResultData(
+                        VaultPath: target.Root,
+                        Flavor: layout.FlavorName,
+                        Exported: snapshot.Count);
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeExportToVaultResultData);
+                }
+
                 return $"✅ Exported {snapshot.Count} memories to vault at '{target.Location}'.";
             }
             catch (MemoryPersistenceException ex)
             {
-                return "❌ koshi_memory_export_to_vault: persistence failed writing to " +
-                       $"target vault '{ex.Location}': {ex.InnerException?.Message ?? ex.Message}. " +
-                       "Target vault may be in a partially-written state; source cache is untouched.";
+                var detail = $"persistence failed writing to target vault '{ex.Location}': " +
+                             $"{ex.InnerException?.Message ?? ex.Message}";
+                if (fmt == OutputFormat.Json)
+                    return OutputFormatting.Error<ExportToVaultResultData>(
+                        ToolName, OutputErrorCodes.PersistenceFailed, detail,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeExportToVaultResultData);
+                return $"❌ {ToolName}: {detail}. Target vault may be in a partially-written state; source cache is untouched.";
             }
         }
+    }
+
+    private static string ExportError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<ExportToVaultResultData>(
+                "koshi_memory_export_to_vault", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeExportToVaultResultData)
+            : $"❌ {message}";
     }
 
     [McpServerTool(Name = "koshi_memory_import_from_vault"), Description(
@@ -587,44 +757,95 @@ public sealed class MemoryTools
         "an existing Obsidian/Foam/Logseq/Dendron vault, or restore from a vault snapshot. One-shot " +
         "import — for ongoing sync, switch KOSHI_MEMORY_VAULT to the vault directly.\n" +
         "WHAT IT DOES: Reads markdown files from the vault and applies them per mode: merge keeps " +
-        "current on id collision; overlay lets the vault win; replace drops current and takes vault.\n" +
+        "current on id collision; overlay lets the vault win; replace drops current and takes vault. " +
+        "Empty vault is not an error — returns ok=true with added=0.\n" +
         "WHAT YOU GIVE IT: vaultPath (required); mode (merge|overlay|replace, default merge); flavor " +
-        "(obsidian|foam|logseq|dendron, default obsidian).")]
+        "(obsidian|foam|logseq|dendron, default obsidian). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string ImportFromVault(
         [Description("Path to the source vault directory")] string vaultPath,
         [Description("Conflict resolution mode: merge | overlay | replace")] string mode = "merge",
-        [Description("Layout flavor for the source vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian")
+        [Description("Layout flavor for the source vault: obsidian (default) | foam | logseq | dendron")] string flavor = "obsidian",
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_memory_import_from_vault";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return ImportError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(vaultPath))
-            return "❌ vaultPath must not be empty.";
+            return ImportError(fmt, OutputErrorCodes.EmptyPath, "vaultPath must not be empty.");
         var modeNorm = (mode ?? "merge").Trim().ToLowerInvariant();
         if (modeNorm is not ("merge" or "overlay" or "replace"))
-            return "❌ mode must be one of: merge, overlay, replace.";
+            return ImportError(fmt, OutputErrorCodes.InvalidMode, "mode must be one of: merge, overlay, replace.");
 
         var resolved = PathConfig.Default.ResolveUserPath(vaultPath)!;
         var layout = VaultLayout.Resolve(flavor);
+
+        // Defensive check: VaultBackend's constructor calls Layout.EnsureDirs
+        // which CREATES the target tree if it doesn't exist. For import that
+        // would silently turn a typo into a successful "added=0" envelope.
+        // Require the import source to already exist; export still auto-
+        // creates because the user is asking for the directory to be written.
+        if (!Directory.Exists(resolved))
+            return ImportError(fmt, OutputErrorCodes.VaultOpenFailed,
+                $"Source vault directory does not exist: '{resolved}'. Check the path or use koshi_memory_export_to_vault to seed it.");
 
         VaultBackend source;
         try { source = new VaultBackend(resolved, watch: false, layout: layout); }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or SecurityException
                 or ArgumentException or NotSupportedException or PathTooLongException)
-        { return $"❌ Could not open vault '{resolved}': {ex.Message}"; }
+        { return ImportError(fmt, OutputErrorCodes.VaultOpenFailed, $"Could not open vault '{resolved}': {ex.Message}"); }
 
         using (source)
         {
             var incoming = source.LoadAll();
+
+            // Empty vault is a successful no-op (idempotency rule).
             if (incoming.Count == 0)
-                return $"No managed memories found at '{source.Location}'.";
+            {
+                if (fmt == OutputFormat.Json)
+                {
+                    var prior = _store.WithFreshState(memories => memories.Count);
+                    var data = new ImportFromVaultResultData(
+                        VaultPath: source.Root,
+                        Mode: modeNorm,
+                        Prior: prior,
+                        Incoming: 0,
+                        Added: 0,
+                        Replaced: 0,
+                        Kept: 0);
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeImportFromVaultResultData);
+                }
+                return $"No managed memories found at '{source.Root}'.";
+            }
 
             try
             {
                 return _store.WithFreshState(memories =>
                 {
+                    int prior = memories.Count;
                     if (modeNorm == "replace")
                     {
-                        int prior = memories.Count;
                         _store.ReplaceAll(incoming);
+
+                        if (fmt == OutputFormat.Json)
+                        {
+                            var data = new ImportFromVaultResultData(
+                                VaultPath: source.Root,
+                                Mode: modeNorm,
+                                Prior: prior,
+                                Incoming: incoming.Count,
+                                Added: incoming.Count,
+                                Replaced: 0,
+                                Kept: 0);
+                            return OutputFormatting.Ok(
+                                ToolName, data,
+                                KoshiOutputJsonContext.Default.JsonEnvelopeImportFromVaultResultData);
+                        }
                         return $"✅ Replaced {prior} current memories with {incoming.Count} from vault.";
                     }
 
@@ -653,31 +874,101 @@ public sealed class MemoryTools
                             added++;
                         }
                     }
+
+                    if (fmt == OutputFormat.Json)
+                    {
+                        var data = new ImportFromVaultResultData(
+                            VaultPath: source.Root,
+                            Mode: modeNorm,
+                            Prior: prior,
+                            Incoming: incoming.Count,
+                            Added: added,
+                            Replaced: replaced,
+                            Kept: kept);
+                        return OutputFormatting.Ok(
+                            ToolName, data,
+                            KoshiOutputJsonContext.Default.JsonEnvelopeImportFromVaultResultData);
+                    }
                     return $"✅ Import complete: {added} added, {replaced} replaced, {kept} kept (existing).";
                 });
             }
             catch (MemoryPersistenceException ex)
             {
-                return FormatPersistenceFailure("koshi_memory_import_from_vault", ex,
+                if (fmt == OutputFormat.Json)
+                    return OutputFormatting.Error<ImportFromVaultResultData>(
+                        ToolName, OutputErrorCodes.PersistenceFailed,
+                        PersistenceFailureDetail(ex),
+                        KoshiOutputJsonContext.Default.JsonEnvelopeImportFromVaultResultData);
+                return FormatPersistenceFailure(ToolName, ex,
                     extra: "Import was partial; the in-memory cache has been reloaded from disk " +
                            "to mirror durable state. Some incoming records may still be applied.");
             }
         }
     }
 
+    private static string ImportError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<ImportFromVaultResultData>(
+                "koshi_memory_import_from_vault", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeImportFromVaultResultData)
+            : $"❌ {message}";
+    }
+
     [McpServerTool(Name = "koshi_memory_sync_vault"), Description(
         "WHEN TO CALL: After the user runs `git pull` on a vault-backed memory store, or whenever you " +
         "suspect external edits (collaborator wrote new notes, file changed by hand). No-op for " +
         "non-vault backends.\n" +
-        "WHAT IT DOES: Forces a re-scan of the vault directory and refreshes the in-memory cache.")]
-    public static string SyncVault()
+        "WHAT IT DOES: Forces a re-scan of the vault directory and refreshes the in-memory cache. " +
+        "Returns ok=true with synced=false and reason=not_a_vault when backend is not a vault.\n" +
+        "Pass format=\"json\" for a parseable envelope (#66).")]
+    public static string SyncVault(
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_memory_sync_vault";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+        {
+            return fmt == OutputFormat.Json
+                ? OutputFormatting.Error<SyncVaultResultData>(
+                    ToolName, OutputErrorCodes.InvalidFormat, fmtErr,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeSyncVaultResultData)
+                : $"❌ {fmtErr}";
+        }
+
         if (_store.Backend.BackendKind != "vault")
+        {
+            if (fmt == OutputFormat.Json)
+            {
+                var count = _store.WithFreshState(memories => memories.Count);
+                var data = new SyncVaultResultData(
+                    Backend: _store.Backend.BackendKind,
+                    Synced: false,
+                    Count: count,
+                    Reason: SyncReasonCodes.NotAVault);
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeSyncVaultResultData);
+            }
             return $"Backend '{_store.Backend.BackendKind}' is not a vault — no sync needed.";
+        }
 
         _store.ForceReload();
-        var count = _store.WithFreshState(memories => memories.Count);
-        return $"✅ Reloaded vault. {count} memories now in cache.";
+        var cnt = _store.WithFreshState(memories => memories.Count);
+
+        if (fmt == OutputFormat.Json)
+        {
+            var data = new SyncVaultResultData(
+                Backend: _store.Backend.BackendKind,
+                Synced: true,
+                Count: cnt,
+                Reason: null);
+            return OutputFormatting.Ok(
+                ToolName, data,
+                KoshiOutputJsonContext.Default.JsonEnvelopeSyncVaultResultData);
+        }
+        return $"✅ Reloaded vault. {cnt} memories now in cache.";
     }
 
     [McpServerTool(Name = "koshi_capture_turn"), Description(
@@ -690,7 +981,7 @@ public sealed class MemoryTools
         "provenance. Set auto_promote=false to preview candidates without saving.\n" +
         "WHAT YOU GIVE IT: turn_summary (1-3 paragraphs of what was decided); linked_pr (optional); " +
         "linked_commits (optional, comma-separated SHAs); auto_promote (default true); max_candidates " +
-        "(default 5); min_confidence (0-1, default 0.5).")]
+        "(default 5); min_confidence (0-1, default 0.5). Pass format=\"json\" for a parseable envelope (#66).")]
     public static string CaptureTurn(
         [Description("Plain-text summary of the turn (1-3 paragraphs). Decision-shape sentences will be extracted.")]
         string turn_summary,
@@ -709,13 +1000,26 @@ public sealed class MemoryTools
         [Description("Optional workspace identifier. Defaults to 'default'.")]
         string? workspaceId = null,
         [Description("Optional thread identifier for conversation-scoped memories.")]
-        string? threadId = null)
+        string? threadId = null,
+        [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
+        string? format = null)
     {
+        const string ToolName = "koshi_capture_turn";
+        var fmt = OutputFormatting.Resolve(format, out var fmtErr);
+        if (fmtErr is not null)
+            return CaptureError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
+
         if (string.IsNullOrWhiteSpace(turn_summary))
-            return "❌ turn_summary must not be empty.";
+            return CaptureError(fmt, OutputErrorCodes.EmptySummary, "turn_summary must not be empty.");
 
         min_confidence = Math.Clamp(min_confidence, 0f, 1f);
         max_candidates = Math.Clamp(max_candidates, 1, 20);
+
+        var scope = new MemoryScope(
+            UserId: string.IsNullOrWhiteSpace(userId) ? "*" : userId.Trim(),
+            WorkspaceId: string.IsNullOrWhiteSpace(workspaceId) ? "default" : workspaceId.Trim(),
+            ThreadId: string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim());
+        var scopeData = new ScopeData(scope.UserId, scope.WorkspaceId, scope.ThreadId);
 
         var allCandidates = DecisionExtractor.Extract(turn_summary, max_candidates);
         var candidates = allCandidates.Where(c => c.Confidence >= min_confidence).ToList();
@@ -725,21 +1029,57 @@ public sealed class MemoryTools
             var diagnostic = allCandidates.Count == 0
                 ? "extractor found no decision-shape sentences"
                 : $"extractor found {allCandidates.Count} weak match(es), all below confidence floor {min_confidence:F2}";
+            var reasonCode = allCandidates.Count == 0
+                ? CaptureReasonCodes.NoDecisionsDetected
+                : CaptureReasonCodes.AllCandidatesBelowFloor;
+
+            if (fmt == OutputFormat.Json)
+            {
+                var data = new CaptureTurnResultData(
+                    AutoPromoted: auto_promote,
+                    CandidatesExtracted: allCandidates.Count,
+                    Saved: [],
+                    Skipped: [],
+                    Candidates: [],
+                    Scope: scopeData,
+                    Reason: reasonCode,
+                    PersistenceWarning: null);
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeCaptureTurnResultData);
+            }
             return "ℹ No decision-shape sentences detected in the turn summary " +
                    $"({diagnostic}). " +
                    "Either no decisions were made, or rephrase explicitly — e.g., " +
                    "\"Decision: ...\", \"We chose X over Y because Z\", \"Fixed by ...\".";
         }
 
-        var scope = new MemoryScope(
-            UserId: string.IsNullOrWhiteSpace(userId) ? "*" : userId.Trim(),
-            WorkspaceId: string.IsNullOrWhiteSpace(workspaceId) ? "default" : workspaceId.Trim(),
-            ThreadId: string.IsNullOrWhiteSpace(threadId) ? null : threadId.Trim());
-
         var provenance = BuildProvenance(linked_pr, linked_commits);
 
         if (!auto_promote)
         {
+            if (fmt == OutputFormat.Json)
+            {
+                var data = new CaptureTurnResultData(
+                    AutoPromoted: false,
+                    CandidatesExtracted: allCandidates.Count,
+                    Saved: [],
+                    Skipped: [],
+                    Candidates: candidates
+                        .Select(c => new CaptureCandidateEntry(
+                            Subject: c.Subject,
+                            Body: c.Body,
+                            Confidence: c.Confidence,
+                            MatchedPattern: c.MatchedPattern))
+                        .ToList(),
+                    Scope: scopeData,
+                    Reason: null,
+                    PersistenceWarning: null);
+                return OutputFormatting.Ok(
+                    ToolName, data,
+                    KoshiOutputJsonContext.Default.JsonEnvelopeCaptureTurnResultData);
+            }
+
             var preview = new System.Text.StringBuilder();
             preview.AppendLine($"📋 {candidates.Count} candidate decision(s) extracted (auto_promote=false, none saved):\n");
             int i = 1;
@@ -758,14 +1098,14 @@ public sealed class MemoryTools
         {
             return _store.WithFreshState(memories =>
             {
-                var saved = new List<(string Id, string Subject)>();
+                var saved = new List<(string Id, string Subject, double Confidence, string Pattern)>();
                 var skipped = new List<(string Subject, string Reason)>();
 
                 foreach (var cand in candidates)
                 {
                     if (memories.Count >= MaxMemories)
                     {
-                        skipped.Add((cand.Subject, "memory limit reached"));
+                        skipped.Add((cand.Subject, CaptureReasonCodes.MemoryLimitReached));
                         break;
                     }
 
@@ -805,13 +1145,32 @@ public sealed class MemoryTools
 
                     memories.Add(record);
                     _store.Upsert(record);
-                    saved.Add((record.Id, cand.Subject));
+                    saved.Add((record.Id, cand.Subject, cand.Confidence, cand.MatchedPattern));
+                }
+
+                if (fmt == OutputFormat.Json)
+                {
+                    var persistenceWarning = _store.Backend.IsEnabled
+                        ? null
+                        : "Persistence is disabled — captures are in-process only. Set KOSHI_MEMORY_FILE or KOSHI_MEMORY_VAULT to persist.";
+                    var data = new CaptureTurnResultData(
+                        AutoPromoted: true,
+                        CandidatesExtracted: allCandidates.Count,
+                        Saved: saved.Select(s => new CaptureSavedEntry(s.Id, s.Subject, s.Confidence, s.Pattern)).ToList(),
+                        Skipped: skipped.Select(s => new CaptureSkippedEntry(s.Subject, s.Reason)).ToList(),
+                        Candidates: [],
+                        Scope: scopeData,
+                        Reason: null,
+                        PersistenceWarning: persistenceWarning);
+                    return OutputFormatting.Ok(
+                        ToolName, data,
+                        KoshiOutputJsonContext.Default.JsonEnvelopeCaptureTurnResultData);
                 }
 
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine($"✅ Captured {saved.Count} decision(s) from turn summary.");
-                foreach (var (id, subject) in saved)
-                    sb.AppendLine($"   • {id}: {subject}");
+                foreach (var s in saved)
+                    sb.AppendLine($"   • {s.Id}: {s.Subject}");
                 if (skipped.Count > 0)
                 {
                     sb.AppendLine($"\n⏭ Skipped {skipped.Count}:");
@@ -825,20 +1184,45 @@ public sealed class MemoryTools
         }
         catch (MemoryPersistenceException ex)
         {
-            return FormatPersistenceFailure("koshi_capture_turn", ex,
+            if (fmt == OutputFormat.Json)
+                return OutputFormatting.Error<CaptureTurnResultData>(
+                    ToolName, OutputErrorCodes.PersistenceFailed,
+                    PersistenceFailureDetail(ex),
+                    KoshiOutputJsonContext.Default.JsonEnvelopeCaptureTurnResultData);
+            return FormatPersistenceFailure(ToolName, ex,
                 extra: "Capture was partial; the in-memory cache has been reloaded from disk. " +
                        "Some earlier candidates in the same call may already be durably saved.");
         }
     }
 
+    private static string CaptureError(OutputFormat fmt, string code, string message)
+    {
+        return fmt == OutputFormat.Json
+            ? OutputFormatting.Error<CaptureTurnResultData>(
+                "koshi_capture_turn", code, message,
+                KoshiOutputJsonContext.Default.JsonEnvelopeCaptureTurnResultData)
+            : $"❌ {message}";
+    }
+
     private static string FormatPersistenceFailure(string toolName, MemoryPersistenceException ex, string? extra = null)
     {
-        var location = string.IsNullOrEmpty(ex.Location) ? "(unset)" : ex.Location;
-        var inner = ex.InnerException?.Message ?? ex.Message;
-        var msg = $"❌ {toolName}: persistence failed on {ex.BackendKind} backend at '{location}': {inner}. " +
+        var msg = $"❌ {toolName}: {PersistenceFailureDetail(ex)}. " +
                   "Cache has been reloaded from disk to mirror the actual durable state.";
         if (extra is not null) msg += " " + extra;
         return msg;
+    }
+
+    /// <summary>
+    /// Just the inner detail of a persistence failure (no decoration, no
+    /// trailing "cache reloaded" sentence) — for embedding in a JSON error
+    /// envelope's <c>message</c> field. The cache-reload behavior is an
+    /// implementation detail callers don't need to parse on.
+    /// </summary>
+    private static string PersistenceFailureDetail(MemoryPersistenceException ex)
+    {
+        var location = string.IsNullOrEmpty(ex.Location) ? "(unset)" : ex.Location;
+        var inner = ex.InnerException?.Message ?? ex.Message;
+        return $"persistence failed on {ex.BackendKind} backend at '{location}': {inner}";
     }
 
     private static string? BuildProvenance(int linkedPr, string? linkedCommits)
