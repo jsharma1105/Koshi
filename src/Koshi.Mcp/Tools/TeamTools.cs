@@ -25,6 +25,14 @@ public sealed class TeamTools
     // exactly the "lost after restart" symptom the user filed #59 about.
     private static readonly object _saveLock = new();
 
+    // Snapshot-load telemetry for koshi_health (#70). Captured once in the
+    // static constructor; subsequent mutations do not update them.
+    private static readonly bool _loadAttempted;
+    private static readonly int _loadedTeamCount;
+    private static readonly int _loadedScoreCount;
+    private static readonly int _loadedFeedbackCount;
+    private static readonly DateTimeOffset? _loadedAt;
+
     static TeamTools()
     {
         var paths = PathConfig.Default;
@@ -43,6 +51,7 @@ public sealed class TeamTools
         });
         _loop = new FeedbackLoop(_registry, _scorer);
 
+        _loadAttempted = _backend.IsEnabled;
         var loaded = _backend.Load();
         if (loaded is not null)
         {
@@ -53,7 +62,12 @@ public sealed class TeamTools
                 kv => kv.Key,
                 kv => (IReadOnlyList<QualityFeedback>)kv.Value);
             _registry.Restore(loaded.Teams, scoresByTeam, feedbackByTeam);
+
+            _loadedTeamCount = loaded.Teams.Count;
+            _loadedScoreCount = loaded.ScoresByTeam.Values.Sum(s => s.Count);
+            _loadedFeedbackCount = loaded.FeedbackByTeam.Values.Sum(f => f.Count);
         }
+        if (_loadAttempted) _loadedAt = DateTimeOffset.UtcNow;
     }
 
     /// <summary>
@@ -74,7 +88,12 @@ public sealed class TeamTools
             PersistenceEnabled: _backend.IsEnabled,
             Path: _backend.Path,
             LastLoadError: _backend.LastLoadError,
-            LastSaveError: _backend.LastSaveError);
+            LastSaveError: _backend.LastSaveError,
+            LoadAttempted: _loadAttempted,
+            LoadedTeamCount: _loadedTeamCount,
+            LoadedScoreCount: _loadedScoreCount,
+            LoadedFeedbackCount: _loadedFeedbackCount,
+            LoadedAt: _loadedAt);
     }
 
     [McpServerTool(Name = "koshi_register_team"), Description(
@@ -357,4 +376,9 @@ public sealed record TeamsStatus(
     bool PersistenceEnabled,
     string? Path,
     string? LastLoadError,
-    string? LastSaveError);
+    string? LastSaveError,
+    bool LoadAttempted,
+    int LoadedTeamCount,
+    int LoadedScoreCount,
+    int LoadedFeedbackCount,
+    DateTimeOffset? LoadedAt);
