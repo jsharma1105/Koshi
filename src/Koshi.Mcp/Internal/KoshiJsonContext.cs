@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
+using Koshi.Core.Context;
 using Koshi.Core.Memory;
 using Koshi.Core.Models;
+using Koshi.Core.Team;
 
 namespace Koshi.Mcp.Internal;
 
@@ -19,6 +21,9 @@ namespace Koshi.Mcp.Internal;
     Converters = [
         typeof(JsonStringEnumConverter<MemoryType>),
         typeof(JsonStringEnumConverter<MemoryTier>),
+        typeof(JsonStringEnumConverter<TeamRole>),
+        typeof(JsonStringEnumConverter<PositioningStrategy>),
+        typeof(JsonStringEnumConverter<FeedbackIssue>),
     ])]
 [JsonSerializable(typeof(PersistenceEnvelope))]
 [JsonSerializable(typeof(MemoryRecord))]
@@ -34,4 +39,16 @@ namespace Koshi.Mcp.Internal;
 [JsonSerializable(typeof(ChunkMetadata))]
 [JsonSerializable(typeof(List<Chunk>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(TeamsEnvelope))]
+[JsonSerializable(typeof(TeamProfile))]
+[JsonSerializable(typeof(List<TeamProfile>))]
+[JsonSerializable(typeof(TeamConfig))]
+[JsonSerializable(typeof(TeamMember))]
+[JsonSerializable(typeof(List<TeamMember>))]
+[JsonSerializable(typeof(QualityScore))]
+[JsonSerializable(typeof(List<QualityScore>))]
+[JsonSerializable(typeof(QualityFeedback))]
+[JsonSerializable(typeof(List<QualityFeedback>))]
+[JsonSerializable(typeof(Dictionary<string, List<QualityScore>>))]
+[JsonSerializable(typeof(Dictionary<string, List<QualityFeedback>>))]
 internal sealed partial class KoshiJsonContext : JsonSerializerContext;

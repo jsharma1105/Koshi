@@ -120,6 +120,15 @@ internal sealed class PathConfig
     public bool MemoryFileFromEnv { get; }
 
     /// <summary>
+    /// Absolute path of the JSON team-registry file (teams, per-turn scores, feedback).
+    /// Defaults to <c>&lt;root&gt;/.koshi/teams.json</c>.
+    /// </summary>
+    public string TeamsFile { get; }
+
+    /// <summary>True iff <c>KOSHI_TEAMS_FILE</c> was set; false when defaulted.</summary>
+    public bool TeamsFileFromEnv { get; }
+
+    /// <summary>
     /// Absolute path of the Markdown memory vault root, or <c>null</c> when
     /// <c>KOSHI_MEMORY_VAULT</c> is unset. Vault mode is opt-in by design.
     /// </summary>
@@ -167,6 +176,10 @@ internal sealed class PathConfig
         (MemoryFile, MemoryFileFromEnv) = Resolve(
             envReader("KOSHI_MEMORY_FILE"),
             defaultValue: Path.Join(ProjectRoot, ".koshi", "memory.json"));
+
+        (TeamsFile, TeamsFileFromEnv) = Resolve(
+            envReader("KOSHI_TEAMS_FILE"),
+            defaultValue: Path.Join(ProjectRoot, ".koshi", "teams.json"));
 
         // Vault stays opt-in — no default. Setting any non-empty value enables
         // vault mode; relative paths resolve against the project root.
@@ -253,7 +266,9 @@ internal sealed class PathConfig
             string.Equals(Path.GetDirectoryName(MemoryFile), defaultStateDir, StringComparison.OrdinalIgnoreCase);
         var indexUsesDefault = !IndexFileFromEnv &&
             string.Equals(Path.GetDirectoryName(IndexFile), defaultStateDir, StringComparison.OrdinalIgnoreCase);
-        if (!memoryUsesDefault && !indexUsesDefault)
+        var teamsUsesDefault = !TeamsFileFromEnv &&
+            string.Equals(Path.GetDirectoryName(TeamsFile), defaultStateDir, StringComparison.OrdinalIgnoreCase);
+        if (!memoryUsesDefault && !indexUsesDefault && !teamsUsesDefault)
             return;
 
         try

@@ -1,19 +1,81 @@
 using System.ComponentModel;
 using Koshi.Core.Harness;
 using Koshi.Core.Team;
+using Koshi.Mcp.Internal;
 using ModelContextProtocol.Server;
 
 namespace Koshi.Mcp.Tools;
 
 /// <summary>
 /// MCP tools for quality scoring and team management.
+/// Team registry, per-turn scores, and per-turn feedback persist across
+/// server restarts in <c>&lt;project-root&gt;/.koshi/teams.json</c> by default.
+/// Override the location with <c>KOSHI_TEAMS_FILE</c>.
 /// </summary>
 [McpServerToolType]
 public sealed class TeamTools
 {
-    private static readonly TeamRegistry _registry = new();
+    private static readonly TeamsBackend _backend;
+    private static readonly TeamRegistry _registry;
     private static readonly QualityScorer _scorer = new();
-    private static readonly FeedbackLoop _loop = new(_registry, _scorer);
+    private static readonly FeedbackLoop _loop;
+    // Single lock that serialises every persistence write. Without this two
+    // concurrent mutations can race: callback A snapshots state v1, callback
+    // B snapshots v2, then A wins the file write and v2 is silently lost —
+    // exactly the "lost after restart" symptom the user filed #59 about.
+    private static readonly object _saveLock = new();
+
+    static TeamTools()
+    {
+        var paths = PathConfig.Default;
+        _backend = new TeamsBackend(paths.TeamsFile);
+        _registry = new TeamRegistry(onChanged: snapshot =>
+        {
+            // Serialised so concurrent mutations cannot reorder the on-disk
+            // state behind the live registry's back. Backend exceptions are
+            // swallowed here (they're already on stderr + LastSaveError);
+            // mutation tool responses surface the failure to the MCP user.
+            lock (_saveLock)
+            {
+                try { _backend.Save(TeamsEnvelope.From(snapshot)); }
+                catch (TeamsPersistenceException) { /* observed via _backend.LastSaveError */ }
+            }
+        });
+        _loop = new FeedbackLoop(_registry, _scorer);
+
+        var loaded = _backend.Load();
+        if (loaded is not null)
+        {
+            var scoresByTeam = loaded.ScoresByTeam.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyList<QualityScore>)kv.Value);
+            var feedbackByTeam = loaded.FeedbackByTeam.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyList<QualityFeedback>)kv.Value);
+            _registry.Restore(loaded.Teams, scoresByTeam, feedbackByTeam);
+        }
+    }
+
+    /// <summary>
+    /// Status snapshot for <c>koshi_health</c>. Forces this type's static
+    /// constructor to run (which loads the persisted teams file) the first
+    /// time it is called, so health output never lies about "0 teams" simply
+    /// because no team tool has been called yet this process.
+    /// </summary>
+    public static TeamsStatus GetStatus()
+    {
+        var snap = _registry.Snapshot();
+        int scoreCount = snap.ScoresByTeam.Values.Sum(s => s.Count);
+        int feedbackCount = snap.FeedbackByTeam.Values.Sum(f => f.Count);
+        return new TeamsStatus(
+            TeamCount: snap.Teams.Count,
+            ScoreCount: scoreCount,
+            FeedbackCount: feedbackCount,
+            PersistenceEnabled: _backend.IsEnabled,
+            Path: _backend.Path,
+            LastLoadError: _backend.LastLoadError,
+            LastSaveError: _backend.LastSaveError);
+    }
 
     [McpServerTool(Name = "koshi_register_team"), Description(
         "Register a team with custom configuration for context engineering.")]
@@ -45,7 +107,9 @@ public sealed class TeamTools
             };
 
             _registry.Register(team);
-            return $"✅ Registered team '{name}' (id: {teamId}, budget: {tokenBudget}, topK: {topK}, target: {qualityTarget:P0})";
+            return AppendWarning(
+                $"✅ Registered team '{name}' (id: {teamId}, budget: {tokenBudget}, topK: {topK}, target: {qualityTarget:P0})",
+                PersistenceWarning());
         }
         catch (InvalidOperationException ex)
         {
@@ -125,7 +189,7 @@ public sealed class TeamTools
             sb.AppendLine($"\n  Target: {teamProfile.Config.QualityTarget:F2} → {(meetsTarget ? "✅ Met" : "❌ Below target")}");
         }
 
-        return sb.ToString();
+        return AppendWarning(sb.ToString(), PersistenceWarning());
     }
 
     [McpServerTool(Name = "koshi_team_dashboard"), Description(
@@ -239,4 +303,36 @@ public sealed class TeamTools
         }
         return flags;
     }
+
+    /// <summary>
+    /// If the most recent save attempt failed, return a one-line warning the
+    /// caller should append to the tool's success message. The in-memory
+    /// mutation already succeeded; this just gives the MCP user a visible
+    /// signal that durability is broken before they hit "lost on restart".
+    /// </summary>
+    private static string? PersistenceWarning()
+    {
+        var err = _backend.LastSaveError;
+        if (err is null) return null;
+        return $"⚠ Team persistence failed: {err}. " +
+               $"Mutation kept in memory but will not survive restart. " +
+               $"Check write access to '{_backend.Path}' or run koshi_health for details.";
+    }
+
+    private static string AppendWarning(string body, string? warning) =>
+        warning is null ? body : body + "\n" + warning;
 }
+
+/// <summary>
+/// Lightweight status snapshot for <c>koshi_health</c>. Plain record so the
+/// diagnostic tool can build the Teams section without taking another
+/// registry snapshot.
+/// </summary>
+public sealed record TeamsStatus(
+    int TeamCount,
+    int ScoreCount,
+    int FeedbackCount,
+    bool PersistenceEnabled,
+    string? Path,
+    string? LastLoadError,
+    string? LastSaveError);
