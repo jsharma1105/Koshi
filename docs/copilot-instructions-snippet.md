@@ -10,6 +10,12 @@ loop breaks.
 The snippet is intentionally short — long agent instructions get
 ignored.
 
+> **Tip:** [`templates/`](../templates/) contains pre-formatted versions
+> of this guidance ready to drop into Cursor (`.cursorrules`), Windsurf
+> (`.windsurfrules`), Claude Code / generic (`AGENTS.md`), and Copilot
+> CLI (`.github/copilot-instructions.md`). The text below is the
+> canonical source these templates are derived from.
+
 ---
 
 ## Koshi memory capture
