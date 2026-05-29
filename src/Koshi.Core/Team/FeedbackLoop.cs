@@ -31,7 +31,7 @@ public sealed class FeedbackLoop
     public QualityScore ProcessTurn(string teamId, TurnMetrics metrics, QualityFeedback? feedback = null)
     {
         var score = _scorer.Score(metrics, feedback);
-        _registry.RecordScore(teamId, score);
+        _registry.RecordScore(teamId, score, metrics);
 
         if (feedback is not null)
             _registry.RecordFeedback(feedback);

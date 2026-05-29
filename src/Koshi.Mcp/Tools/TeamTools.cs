@@ -65,10 +65,22 @@ public sealed class TeamTools
         [Description("Total latency in milliseconds")] int latencyMs = 3000,
         [Description("User rating 1-5 (0 = no rating)")] int userRating = 0,
         [Description("Issues: irrelevant,incomplete,hallucinated,verbose,terse,format,outdated,slow (comma-separated)")]
-        string? issues = null)
+        string? issues = null,
+        [Description("Total input tokens for the turn (0 = derive from budgetUtilization x team's ContextBudgetTokens)")]
+        int tokensUsed = 0)
     {
+        var teamProfile = _registry.GetTeam(teamId);
+        int inputTokens = tokensUsed > 0
+            ? tokensUsed
+            : teamProfile is not null
+                ? (int)Math.Round(budgetUtilization * teamProfile.Config.ContextBudgetTokens)
+                : 0;
+        int cachedTokens = (int)Math.Round(cacheRatio * inputTokens);
+
         var metrics = new TurnMetrics
         {
+            InputTokens = inputTokens,
+            CachedTokens = cachedTokens,
             RetrievedChunkCount = retrievedChunks,
             RecalledMemoryCount = memoriesRecalled,
             BudgetUtilization = budgetUtilization,
@@ -93,7 +105,7 @@ public sealed class TeamTools
             };
         }
 
-        QualityScore score = _registry.GetTeam(teamId) is not null
+        QualityScore score = teamProfile is not null
             ? _loop.ProcessTurn(teamId, metrics, feedback)
             : _scorer.Score(metrics, feedback);
 
@@ -107,10 +119,10 @@ public sealed class TeamTools
         sb.AppendLine();
         sb.AppendLine($"  Composite:  {Bar(score.Composite)} {score.Composite:F2} → Grade {score.Grade}");
 
-        if (_registry.GetTeam(teamId) is { } team)
+        if (teamProfile is not null)
         {
-            bool meetsTarget = score.MeetsTarget(team.Config.QualityTarget);
-            sb.AppendLine($"\n  Target: {team.Config.QualityTarget:F2} → {(meetsTarget ? "✅ Met" : "❌ Below target")}");
+            bool meetsTarget = score.MeetsTarget(teamProfile.Config.QualityTarget);
+            sb.AppendLine($"\n  Target: {teamProfile.Config.QualityTarget:F2} → {(meetsTarget ? "✅ Met" : "❌ Below target")}");
         }
 
         return sb.ToString();

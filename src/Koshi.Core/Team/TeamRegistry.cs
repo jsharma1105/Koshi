@@ -1,6 +1,7 @@
 namespace Koshi.Core.Team;
 
 using System.Collections.Concurrent;
+using Koshi.Core.Harness;
 
 /// <summary>
 /// Registry for managing teams and their configurations.
@@ -12,6 +13,7 @@ public sealed class TeamRegistry
     private readonly ConcurrentDictionary<string, TeamProfile> _teams = new();
     private readonly ConcurrentDictionary<string, List<QualityFeedback>> _feedback = new();
     private readonly ConcurrentDictionary<string, List<QualityScore>> _scores = new();
+    private readonly ConcurrentDictionary<string, List<TurnMetrics>> _metrics = new();
 
     /// <summary>Register a new team.</summary>
     public void Register(TeamProfile team)
@@ -20,6 +22,7 @@ public sealed class TeamRegistry
             throw new InvalidOperationException($"Team '{team.TeamId}' already registered");
         _feedback[team.TeamId] = [];
         _scores[team.TeamId] = [];
+        _metrics[team.TeamId] = [];
     }
 
     /// <summary>Get a team by ID.</summary>
@@ -37,12 +40,24 @@ public sealed class TeamRegistry
         _teams[teamId] = team with { Config = newConfig };
     }
 
-    /// <summary>Record a quality score for a team.</summary>
-    public void RecordScore(string teamId, QualityScore score)
+    /// <summary>Record a quality score for a team. Optionally records the raw per-turn metrics that produced it so the dashboard can aggregate Tokens Used / Avg Latency / Cache Hit Rate / Budget Utilization without needing a side-channel QualityTracker.</summary>
+    public void RecordScore(string teamId, QualityScore score, TurnMetrics? metrics = null)
     {
         if (!_scores.TryGetValue(teamId, out var scores))
             throw new KeyNotFoundException($"Team '{teamId}' not found");
         lock (scores) { scores.Add(score); }
+        if (metrics is not null && _metrics.TryGetValue(teamId, out var metricsList))
+        {
+            lock (metricsList) { metricsList.Add(metrics); }
+        }
+    }
+
+    /// <summary>Record a quality score and its raw per-turn metrics for a team.</summary>
+    public void RecordMetrics(string teamId, TurnMetrics metrics)
+    {
+        if (!_metrics.TryGetValue(teamId, out var metricsList))
+            throw new KeyNotFoundException($"Team '{teamId}' not found");
+        lock (metricsList) { metricsList.Add(metrics); }
     }
 
     /// <summary>Record user feedback for a team.</summary>
@@ -65,6 +80,13 @@ public sealed class TeamRegistry
     {
         if (!_feedback.TryGetValue(teamId, out var fb)) return [];
         lock (fb) { return [.. fb]; }
+    }
+
+    /// <summary>Get all raw per-turn metrics recorded for a team.</summary>
+    public IReadOnlyList<TurnMetrics> GetMetrics(string teamId)
+    {
+        if (!_metrics.TryGetValue(teamId, out var m)) return [];
+        lock (m) { return [.. m]; }
     }
 
     /// <summary>
@@ -103,18 +125,54 @@ public sealed class TeamRegistry
         // Generate recommendations
         var recommendations = GenerateRecommendations(team, scores, feedback);
 
+        // Aggregate the raw per-turn metrics. Prefer the harness QualityTracker
+        // when one is supplied (preserves existing SessionOrchestrator behavior);
+        // otherwise compute from the metrics we captured in RecordScore so that
+        // dashboards built purely from koshi_score_turn (MCP path) populate
+        // Tokens Used / Avg Latency / Cache Hit Rate / Budget Util.
+        var metrics = GetMetrics(teamId);
+        long totalTokens;
+        float avgCacheRatio;
+        float avgBudgetUtilization;
+        double avgLatencyMs;
+        int fallbackCount;
+        if (qualityTracker is not null)
+        {
+            totalTokens = qualityTracker.TotalTokensConsumed;
+            avgCacheRatio = qualityTracker.AvgCacheRatio;
+            avgBudgetUtilization = qualityTracker.AvgBudgetUtilization;
+            avgLatencyMs = qualityTracker.AvgTotalLatency.TotalMilliseconds;
+            fallbackCount = qualityTracker.FallbackCount;
+        }
+        else if (metrics.Count > 0)
+        {
+            totalTokens = metrics.Sum(m => (long)m.InputTokens + m.OutputTokens);
+            avgCacheRatio = metrics.Average(m => m.CacheRatio);
+            avgBudgetUtilization = metrics.Average(m => m.BudgetUtilization);
+            avgLatencyMs = metrics.Average(m => m.TotalLatency.TotalMilliseconds);
+            fallbackCount = 0; // TurnMetrics has no FallbackLevel — tracked only via harness
+        }
+        else
+        {
+            totalTokens = 0;
+            avgCacheRatio = 0;
+            avgBudgetUtilization = 0;
+            avgLatencyMs = 0;
+            fallbackCount = 0;
+        }
+
         return new TeamDashboard
         {
             TeamId = teamId,
             TeamName = team.Name,
             TotalTurns = scores.Count,
             TotalSessions = feedback.Select(f => f.SessionId).Distinct().Count(),
-            TotalTokensConsumed = qualityTracker?.TotalTokensConsumed ?? 0,
+            TotalTokensConsumed = totalTokens,
             AvgQualityScore = avgScore,
-            AvgCacheHitRate = qualityTracker?.AvgCacheRatio ?? 0,
-            AvgBudgetUtilization = qualityTracker?.AvgBudgetUtilization ?? 0,
-            AvgLatencyMs = qualityTracker?.AvgTotalLatency.TotalMilliseconds ?? 0,
-            FallbackCount = qualityTracker?.FallbackCount ?? 0,
+            AvgCacheHitRate = avgCacheRatio,
+            AvgBudgetUtilization = avgBudgetUtilization,
+            AvgLatencyMs = avgLatencyMs,
+            FallbackCount = fallbackCount,
             TotalFactsExtracted = 0,
             FeedbackCount = feedback.Count,
             AvgUserRating = avgRating,
