@@ -18,9 +18,14 @@ public sealed class ContextTools
     // before issue #29.
 
     [McpServerTool(Name = "koshi_compile_context"), Description(
-        "Compile content into an optimally packed context window. " +
-        "Takes retrieval results, system prompt, and optional memory/history " +
-        "and returns positioned content within your token budget.")]
+        "WHEN TO CALL: Once you have collected retrieval results AND/OR memories AND need to pack them " +
+        "into a token-budgeted prompt window before sending to an LLM. Call AFTER koshi_search and/or " +
+        "koshi_recall — never in place of them.\n" +
+        "WHAT IT DOES: Positions retrieved chunks, memories, team context, and the user query inside " +
+        "tokenBudget using a cache-first strategy by default. Deterministic. No LLM, no network.\n" +
+        "WHAT YOU GIVE IT: systemPrompt + userQuery (required); retrievedContent (sections joined with " +
+        "'\\n---\\n'); memories (JSON array, or raw koshi_recall output — auto-parsed); teamContext; " +
+        "tokenBudget (default 8192); strategy (CacheOptimized|PrimacyRecency|RelevanceDescending|Chronological).")]
     public static string CompileContext(
         [Description("System prompt for the LLM")] string systemPrompt,
         [Description("The user's query")] string userQuery,
@@ -149,7 +154,11 @@ public sealed class ContextTools
     }
 
     [McpServerTool(Name = "koshi_token_count"), Description(
-        "Count tokens in a piece of text using the GPT-4 tokenizer.")]
+        "WHEN TO CALL: To check whether a string fits a budget, or to size a prospective chunk before " +
+        "sending it to an LLM. Useful inside loops that build prompts.\n" +
+        "WHAT IT DOES: Returns token count using the GPT-4 tokenizer plus character count and chars/token " +
+        "ratio. Deterministic. No network.\n" +
+        "WHAT YOU GIVE IT: text (the string to measure).")]
     public static string CountTokens(
         [Description("The text to count tokens for")] string text)
     {
@@ -158,8 +167,13 @@ public sealed class ContextTools
     }
 
     [McpServerTool(Name = "koshi_budget_plan"), Description(
-        "Plan a token budget allocation across roles. " +
-        "Shows how tokens would be divided between system prompt, retrieval, memory, and history.")]
+        "WHEN TO CALL: BEFORE building a prompt window when you want to see how a total budget will " +
+        "split across system prompt, team context, retrieval, memory, and history. Skip if you already " +
+        "know your allocation.\n" +
+        "WHAT IT DOES: Computes fixed costs (system + team), then suggests how to divide the remaining " +
+        "budget 50/25/25 across retrieval/memory/history. Reports cache-savings potential.\n" +
+        "WHAT YOU GIVE IT: totalBudget (default 8192); systemPrompt (optional, to measure its size); " +
+        "teamContext (optional).")]
     public static string PlanBudget(
         [Description("Total token budget")] int totalBudget = 8192,
         [Description("System prompt text (to measure its size)")] string? systemPrompt = null,
