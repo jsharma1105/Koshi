@@ -40,4 +40,16 @@ namespace Koshi.Mcp.Internal;
 [JsonSerializable(typeof(JsonEnvelope<ListTeamsResultData>))]
 [JsonSerializable(typeof(JsonEnvelope<TeamDashboardResultData>))]
 [JsonSerializable(typeof(JsonEnvelope<AnalyzeFeedbackResultData>))]
+// ── Phase 2b — mutation/persistence tools ────────────────────────────────
+[JsonSerializable(typeof(JsonEnvelope<RememberResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ForgetResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ClearMemoriesResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<CaptureTurnResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ExportToVaultResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ImportFromVaultResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<SyncVaultResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<IndexResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<IndexDirectoryResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<ClearIndexResultData>))]
+[JsonSerializable(typeof(JsonEnvelope<RegisterTeamResultData>))]
 internal sealed partial class KoshiOutputJsonContext : JsonSerializerContext;

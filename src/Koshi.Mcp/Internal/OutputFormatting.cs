@@ -36,6 +36,50 @@ public static class OutputErrorCodes
     public const string NoMatchInScope = "no_match_in_scope";
     public const string NoMatchOfType = "no_match_of_type";
     public const string NoMatchForQuery = "no_match_for_query";
+
+    // ── Phase 2b — mutation/persistence tool error codes ────────────────
+    public const string EmptyContent = "empty_content";
+    public const string EmptySubject = "empty_subject";
+    public const string EmptyPath = "empty_path";
+    public const string EmptySummary = "empty_summary";
+    public const string MemoryLimitReached = "memory_limit_reached";
+    public const string PersistenceFailed = "persistence_failed";
+    public const string ConfirmationRequired = "confirmation_required";
+    public const string VaultOpenFailed = "vault_open_failed";
+    public const string VaultNotEmpty = "vault_not_empty";
+    public const string InvalidMode = "invalid_mode";
+    public const string InvalidJson = "invalid_json";
+    public const string NoDocuments = "no_documents";
+    public const string TooManyChunks = "too_many_chunks";
+    public const string DirectoryNotFound = "directory_not_found";
+    public const string AccessDenied = "access_denied";
+    public const string IoError = "io_error";
+    public const string NoFiles = "no_files";
+    public const string AllEmpty = "all_empty";
+    public const string InvalidTeam = "invalid_team";
+}
+
+/// <summary>
+/// Stable reason-code constants for non-error informational outcomes carried
+/// in the success envelope's <c>reason</c> field (#66 Phase 2b). Like
+/// <see cref="OutputErrorCodes"/>, these are frozen <c>snake_case</c> strings:
+/// programmatic callers may switch on them; never rename, only add.
+/// </summary>
+public static class CaptureReasonCodes
+{
+    public const string NoDecisionsDetected = "no_decisions_detected";
+    public const string AllCandidatesBelowFloor = "all_candidates_below_floor";
+    public const string MemoryLimitReached = "memory_limit_reached";
+    public const string AllDuplicates = "all_duplicates";
+}
+
+/// <summary>
+/// Reason codes returned by <c>koshi_memory_sync_vault</c> when the operation
+/// is a no-op (e.g. backend is not a vault).
+/// </summary>
+public static class SyncReasonCodes
+{
+    public const string NotAVault = "not_a_vault";
 }
 
 /// <summary>

@@ -87,8 +87,21 @@ internal static class StructuredOutputAssertions
 
     private static void AssertNoEmojiOrBoxDrawing(string value)
     {
-        // Box-drawing characters used by every text formatter in the codebase.
-        var forbidden = new[] { "═", "─", "│", "┌", "┐", "└", "┘", "├", "┤", "❌", "✅", "⚠️", "📊", "🟢", "🟡", "🔴", "🟠" };
+        // Text-mode decorations used across the Koshi tools. Any of these
+        // leaking into a JSON envelope means a code-path forgot to strip
+        // text formatting or branch on OutputFormat.
+        var forbidden = new[]
+        {
+            // Box-drawing characters used by every text formatter in the codebase.
+            "═", "─", "│", "┌", "┐", "└", "┘", "├", "┤",
+            // Severity emoji.
+            "❌", "✅", "⚠️", "⚠",
+            // Dashboard/health emoji.
+            "📊", "🟢", "🟡", "🔴", "🟠",
+            // Phase 2b memory/capture tool emoji (#66 N9 — must be kept in
+            // sync with MemoryTools.cs / RetrievalTools.cs text output).
+            "🔢", "ℹ", "📋", "⏭",
+        };
         foreach (var token in forbidden)
             Assert.DoesNotContain(token, value);
     }
