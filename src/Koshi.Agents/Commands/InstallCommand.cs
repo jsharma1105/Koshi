@@ -24,6 +24,12 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
         [CommandOption("--force")]
         [Description("Overwrite existing files without prompting.")]
         public bool Force { get; init; }
+
+        [CommandOption("--no-mcp")]
+        [Description(
+            "Skip registering the koshi MCP server in the client's mcp config. " +
+            "Personas are still installed; you must register koshi-mcp yourself.")]
+        public bool NoMcp { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -35,6 +41,7 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
         var writes = 0;
         var skips = 0;
         var errors = 0;
+        var mcpResults = new List<(PersonaClient Client, McpRegisterResult Result)>();
 
         foreach (var client in clients)
         {
@@ -108,6 +115,17 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
                         $"  [red]error          [/] {Markup.Escape(target)} — {Markup.Escape(ex.Message)}");
                 }
             }
+
+            if (!settings.NoMcp)
+            {
+                var mcpResult = McpConfigWriter.RegisterKoshi(client, settings.DryRun);
+                mcpResults.Add((client, mcpResult));
+                ReportMcpResult(mcpResult);
+                if (mcpResult.Outcome == McpRegisterOutcome.Error)
+                {
+                    errors++;
+                }
+            }
         }
 
         AnsiConsole.WriteLine();
@@ -119,10 +137,74 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
         if (!settings.DryRun && writes > 0)
         {
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[bold]Next:[/] make sure the [cyan]koshi[/] MCP server is registered in your client.");
-            AnsiConsole.MarkupLine("[grey]Run [bold]koshi-agents doctor[/] to verify.[/]");
+            EmitNextSteps(mcpResults, settings.NoMcp);
         }
 
         return errors == 0 ? 0 : 1;
+    }
+
+    private static void ReportMcpResult(McpRegisterResult result)
+    {
+        var path = Markup.Escape(result.ConfigPath);
+        switch (result.Outcome)
+        {
+            case McpRegisterOutcome.Created:
+                AnsiConsole.MarkupLine($"  [green]mcp created   [/] {path}");
+                break;
+            case McpRegisterOutcome.Added:
+                AnsiConsole.MarkupLine(
+                    $"  [green]mcp added     [/] {path}" +
+                    (result.BackupPath is null
+                        ? string.Empty
+                        : $" [grey](backup: {Markup.Escape(result.BackupPath)})[/]"));
+                break;
+            case McpRegisterOutcome.AlreadyPresent:
+                AnsiConsole.MarkupLine($"  [grey]mcp already-ok[/] {path}");
+                break;
+            case McpRegisterOutcome.DryRun:
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]mcp dry-run   [/] {path} " +
+                    $"[grey]({Markup.Escape(result.ErrorMessage ?? "would register koshi")})[/]");
+                break;
+            case McpRegisterOutcome.Error:
+                AnsiConsole.MarkupLine(
+                    $"  [red]mcp error     [/] {path} — {Markup.Escape(result.ErrorMessage ?? "unknown")}");
+                break;
+        }
+    }
+
+    private static void EmitNextSteps(
+        IReadOnlyList<(PersonaClient Client, McpRegisterResult Result)> mcpResults,
+        bool skippedMcp)
+    {
+        if (skippedMcp)
+        {
+            AnsiConsole.MarkupLine(
+                "[bold]Next:[/] register the [cyan]koshi[/] MCP server in each client " +
+                "(you passed [yellow]--no-mcp[/]).");
+            AnsiConsole.MarkupLine("[grey]  • Copilot CLI: [bold]copilot mcp add koshi -- koshi-mcp[/][/]");
+            AnsiConsole.MarkupLine(
+                "[grey]  • Claude Desktop: add the koshi entry to " +
+                "claude_desktop_config.json manually[/]");
+        }
+        else
+        {
+            var anyWritten = mcpResults.Any(r =>
+                r.Result.Outcome is McpRegisterOutcome.Created
+                                  or McpRegisterOutcome.Added);
+            if (anyWritten)
+            {
+                AnsiConsole.MarkupLine(
+                    "[bold]Next:[/] restart your client so it picks up the new " +
+                    "[cyan]koshi[/] MCP server entry, then invoke a persona.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(
+                    "[bold]Next:[/] invoke a persona — e.g. " +
+                    "[cyan]copilot --agent koshi-orchestrator \"ping\"[/].");
+            }
+        }
+        AnsiConsole.MarkupLine("[grey]Run [bold]koshi-agents doctor[/] to verify.[/]");
     }
 }

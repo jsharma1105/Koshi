@@ -53,14 +53,26 @@ internal static class ClientResolver
 
     /// <summary>
     /// The exact JSON snippet a user should add to their MCP config to register Koshi.
+    /// Shape varies by client: Copilot CLI uses <c>"type": "local"</c> for stdio
+    /// (subprocess) servers; Claude Desktop's mcpServers schema does not use a
+    /// <c>type</c> field, so we omit it.
     /// </summary>
-    public static string SuggestedMcpEntry() => """
-        "koshi": {
-          "command": "koshi-mcp",
-          "args": [],
-          "type": "stdio"
-        }
-        """;
+    public static string SuggestedMcpEntry(PersonaClient client) => client switch
+    {
+        PersonaClient.Copilot => """
+            "koshi": {
+              "command": "koshi-mcp",
+              "args": [],
+              "type": "local"
+            }
+            """,
+        _ => """
+            "koshi": {
+              "command": "koshi-mcp",
+              "args": []
+            }
+            """,
+    };
 }
 
 internal enum ScopeKind

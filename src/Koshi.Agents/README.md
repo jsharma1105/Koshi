@@ -19,7 +19,7 @@ koshi-agents list
 # Show what a persona will do (and which MCP tools it can call)
 koshi-agents show koshi-librarian
 
-# Install all 5 personas for Claude Code
+# Install all 5 personas for Claude Code (also registers the koshi MCP entry)
 koshi-agents install --client claude
 
 # ...or Copilot CLI
@@ -27,6 +27,9 @@ koshi-agents install --client copilot
 
 # ...or both, scoped to current repo only
 koshi-agents install --client both --scope repo
+
+# Install personas only — leave the client's MCP config untouched
+koshi-agents install --client copilot --no-mcp
 
 # Preview without writing
 koshi-agents install --client claude --dry-run
@@ -72,7 +75,11 @@ Each persona ships in **two formats**:
 ## What this is not
 
 - Not a copy-paste guide. Use `koshi-agents install` instead.
-- Not a config editor. We *read* `settings.json` / `mcp-config.json`; we don't rewrite them.
+- Not a full config editor. `install` adds (or refreshes) only the
+  `mcpServers.koshi` entry in the client's MCP config — every other key
+  is left untouched, and the previous file is snapshotted to `<file>.bak`
+  before any write. Pass `--no-mcp` to skip the config write entirely,
+  or `--dry-run` to preview.
 - Not telemetry. Nothing in this tool phones home.
 
 ## License

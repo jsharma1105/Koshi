@@ -65,7 +65,7 @@ internal sealed class DoctorCommand : Command<DoctorCommand.Settings>
                     AnsiConsole.MarkupLine($"  [red]✗[/] no [bold]koshi[/] entry in [grey]{Markup.Escape(cfg)}[/]");
                     AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(detail)}[/]");
                     AnsiConsole.MarkupLine("    [grey]Add this to your mcpServers block:[/]");
-                    AnsiConsole.Write(new Panel(Markup.Escape(ClientResolver.SuggestedMcpEntry()))
+                    AnsiConsole.Write(new Panel(Markup.Escape(ClientResolver.SuggestedMcpEntry(client)))
                         .Border(BoxBorder.Rounded)
                         .Header("snippet"));
                     failures++;
