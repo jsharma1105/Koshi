@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Koshi.Core.Memory;
@@ -96,12 +97,10 @@ internal static class MemoryInputParser
                 KoshiJsonContext.Default.ListParsedMemoryInput);
             if (items is null || items.Count == 0)
                 return false;
-            foreach (var item in items)
+            foreach (var item in items.Where(i => !string.IsNullOrWhiteSpace(i.Content)))
             {
-                if (string.IsNullOrWhiteSpace(item.Content))
-                    continue;
                 result.Add(new ParsedMemory(
-                    Content: item.Content.Trim(),
+                    Content: item.Content!.Trim(),
                     Type: item.Type,
                     Subject: item.Subject,
                     Confidence: item.Confidence));

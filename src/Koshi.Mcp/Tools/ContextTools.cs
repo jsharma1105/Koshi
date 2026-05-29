@@ -141,7 +141,7 @@ public sealed class ContextTools
                 header.Append((conf * 100).ToString("F0", System.Globalization.CultureInfo.InvariantCulture));
                 header.Append("%)");
             }
-            return header.ToString() + "\n  " + parsed.Content;
+            return $"{header}\n  {parsed.Content}";
         }
 
         // Plain text: include verbatim.
