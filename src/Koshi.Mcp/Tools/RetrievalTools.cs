@@ -36,7 +36,11 @@ public sealed class RetrievalTools
     // RetrievalTools + ContextTools share a single instance and a single env
     // var (KOSHI_TOKENIZER_MODEL) selects the encoding for both.
 
-    private static readonly IndexPersistence _persistence;
+    private static readonly IndexPersistence _defaultPersistence;
+    // Mutable so tests can point it at a sandbox file without changing the
+    // global process environment. Production code never reassigns this — only
+    // the InternalsVisibleTo'd test reset hook does.
+    private static IndexPersistence _persistence;
 
     // Default-corpus state. The default corpus is the only corpus that is
     // wired into snapshot persistence + auto-indexing — additional named
@@ -48,6 +52,16 @@ public sealed class RetrievalTools
     private static bool _isIndexed;
     private static bool _snapshotLoadAttempted;
     private static bool _loadedFromSnapshot;
+    // Why the last snapshot load attempt was discarded (if any). Surfaced via
+    // GetStatus → koshi_health so users can see WHY they're stuck on
+    // "No documents indexed" instead of a silent stderr log they may have
+    // never seen. Null when there has been no discard.
+    private static string? _snapshotDiscardReason;
+    // Non-fatal note about a loaded snapshot — e.g. "loaded from a snapshot
+    // file whose source is outside the project root". Surfaced in health
+    // output so the user can sanity-check that they're searching what they
+    // expect to be searching.
+    private static string? _snapshotLoadWarning;
 
     // Named-corpus registry (issue #23). The default corpus is intentionally
     // NOT a key here — it lives in the legacy single-corpus fields above so
@@ -77,7 +91,34 @@ public sealed class RetrievalTools
 
     static RetrievalTools()
     {
-        _persistence = new IndexPersistence(PathConfig.Default.IndexFile);
+        _defaultPersistence = new IndexPersistence(PathConfig.Default.IndexFile);
+        _persistence = _defaultPersistence;
+    }
+
+    /// <summary>
+    /// Test-only hook: redirect persistence at a sandbox file and wipe all
+    /// in-memory corpus state. Not for production use. Pass null to revert
+    /// to the process-default persistence resolved from <c>PathConfig</c>.
+    /// </summary>
+    internal static void ResetForTests(string? sandboxIndexFile)
+    {
+        lock (_lock)
+        {
+            _persistence = sandboxIndexFile is null
+                ? _defaultPersistence
+                : new IndexPersistence(sandboxIndexFile);
+            _indexedChunks = [];
+            _keywordRetriever = null;
+            _indexedFromPath = null;
+            _indexedEnumeration = null;
+            _isIndexed = false;
+            _snapshotLoadAttempted = false;
+            _loadedFromSnapshot = false;
+            _snapshotDiscardReason = null;
+            _snapshotLoadWarning = null;
+            _lastAutoIndexAttempt = DateTimeOffset.MinValue;
+            _lastAutoIndexFailureMessage = null;
+        }
     }
 
     [McpServerTool(Name = "koshi_index"), Description(
@@ -498,6 +539,8 @@ public sealed class RetrievalTools
             _isIndexed = false;
             _snapshotLoadAttempted = true; // Don't auto-reload a stale snapshot we just cleared.
             _loadedFromSnapshot = false;
+            _snapshotDiscardReason = null;
+            _snapshotLoadWarning = null;
             // Reset auto-index retry throttle so the next koshi_search can
             // re-attempt KOSHI_INDEX_PATH immediately (#31).
             _lastAutoIndexAttempt = DateTimeOffset.MinValue;
@@ -517,7 +560,10 @@ public sealed class RetrievalTools
         return msg;
     }
 
-    internal static (int chunkCount, int sourceCount, string? path, bool indexed, bool persistenceEnabled, string? persistencePath, bool loadedFromSnapshot) GetStatus()
+    internal static (
+        int chunkCount, int sourceCount, string? path, bool indexed,
+        bool persistenceEnabled, string? persistencePath, bool loadedFromSnapshot,
+        string? snapshotDiscardReason, string? snapshotLoadWarning) GetStatus()
     {
         EnsureCorpusLoaded();
         lock (_lock)
@@ -526,7 +572,8 @@ public sealed class RetrievalTools
                 ? 0
                 : _indexedChunks.GroupBy(c => c.Metadata.Source).Count();
             return (_indexedChunks.Count, sourceCount, _indexedFromPath, _isIndexed,
-                    _persistence.IsEnabled, _persistence.Path, _loadedFromSnapshot);
+                    _persistence.IsEnabled, _persistence.Path, _loadedFromSnapshot,
+                    _snapshotDiscardReason, _snapshotLoadWarning);
         }
     }
 
@@ -548,87 +595,173 @@ public sealed class RetrievalTools
     /// No-op when persistence is disabled, no snapshot exists, or the snapshot is stale.
     /// Called from every public entry point that observes index state.
     /// </summary>
+    /// <summary>
+    /// Attempts to populate the in-memory corpus from a persisted snapshot
+    /// on first access. No-op when persistence is disabled, no snapshot
+    /// exists, or the snapshot is rejected (stale fingerprint, copied
+    /// between projects, or env-explicit path mismatch).
+    ///
+    /// <para>Holds the master lock for the full duration of the load — this
+    /// is one-shot per process and a few seconds of initial blocking is
+    /// preferable to the silent "no documents indexed" race that arises if
+    /// thread A flips <see cref="_snapshotLoadAttempted"/> before completing
+    /// while thread B sees the flag and skips loading.</para>
+    /// </summary>
     private static void EnsureCorpusLoaded()
     {
         lock (_lock)
         {
             if (_isIndexed || _snapshotLoadAttempted || !_persistence.IsEnabled) return;
+
+            var envelope = _persistence.LoadOrNull();
+            // Mark attempted only after LoadOrNull returns — if it returned
+            // because the file simply doesn't exist yet (cold start), a
+            // subsequent koshi_index_directory + restart cycle should still
+            // see the next load attempt fire. The bool prevents repeated
+            // disk reads inside one process, not across processes.
             _snapshotLoadAttempted = true;
-        }
 
-        var envelope = _persistence.LoadOrNull();
-        if (envelope is null || envelope.Chunks.Count == 0) return;
-
-        // Validate fingerprint when the snapshot has an on-disk source.
-        if (envelope.SourcePath is not null
-            && envelope.SourcePath != ContentFingerprint.InMemorySource
-            && envelope.ContentFingerprint is not null)
-        {
-            // Cross-check against KOSHI_INDEX_PATH when explicitly set — if the
-            // user pointed the server at a different directory than the
-            // snapshot came from, we must not silently serve stale results.
-            // We only check when the env var was explicitly set, to avoid
-            // false positives from the v0.6.0 project-root default.
-            if (PathConfig.Default.IndexPathFromEnv)
+            if (envelope is null || envelope.Chunks.Count == 0)
             {
-                var resolved = PathConfig.Default.IndexPath;
-                if (!string.Equals(resolved, envelope.SourcePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.Error.WriteLine(
-                        $"[koshi] Discarding index snapshot: source path '{envelope.SourcePath}' " +
-                        $"differs from KOSHI_INDEX_PATH '{resolved}'.");
-                    return;
-                }
-            }
-            else
-            {
-                // Containment safety: when KOSHI_INDEX_PATH is unset (using
-                // the v0.6.0 defaults), we only accept snapshots whose source
-                // is under the project root. Prevents a stray .koshi/
-                // copied between projects from silently serving results
-                // sourced from a totally different directory.
-                var root = PathConfig.Default.ProjectRoot;
-                var srcFull = Path.GetFullPath(envelope.SourcePath);
-                if (!srcFull.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(srcFull, root, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.Error.WriteLine(
-                        $"[koshi] Discarding index snapshot: source path '{srcFull}' " +
-                        $"is outside project root '{root}'. Set KOSHI_INDEX_PATH explicitly to override.");
-                    return;
-                }
-            }
-
-            var current = ContentFingerprint.Compute(envelope.SourcePath, envelope.Enumeration);
-            if (current is null || !string.Equals(current, envelope.ContentFingerprint, StringComparison.Ordinal))
-            {
-                Console.Error.WriteLine(
-                    $"[koshi] Discarding index snapshot for '{envelope.SourcePath}': " +
-                    $"content fingerprint changed since {envelope.SavedAt:u}.");
+                _snapshotDiscardReason = envelope is null ? null : "snapshot file is empty";
                 return;
             }
-        }
 
-        var retriever = new KeywordRetriever();
-        retriever.Index(envelope.Chunks);
+            if (!IsSnapshotAcceptable(envelope, out var discardReason, out var warning))
+            {
+                _snapshotDiscardReason = discardReason;
+                Console.Error.WriteLine($"[koshi] Discarding index snapshot: {discardReason}");
+                return;
+            }
 
-        lock (_lock)
-        {
+            var retriever = new KeywordRetriever();
+            retriever.Index(envelope.Chunks);
+
             _indexedChunks = envelope.Chunks;
             _keywordRetriever = retriever;
             _indexedFromPath = envelope.SourcePath;
             _indexedEnumeration = envelope.Enumeration;
             _isIndexed = true;
             _loadedFromSnapshot = true;
+            _snapshotDiscardReason = null;
+            _snapshotLoadWarning = warning;
             // Snapshot satisfied the indexed-state requirement; clear any
             // prior auto-index failure cache so the throttle starts fresh
             // if a future koshi_clear_index + retry is needed (#31).
             _lastAutoIndexFailureMessage = null;
+
+            Console.Error.WriteLine(
+                $"[koshi] Loaded index snapshot: {envelope.Chunks.Count} chunks from " +
+                $"'{envelope.SourcePath ?? "(unknown)"}' (saved {envelope.SavedAt:u}).");
+            if (warning is not null)
+                Console.Error.WriteLine($"[koshi] {warning}");
+        }
+    }
+
+    /// <summary>
+    /// Decide whether a loaded snapshot should be accepted. Returns true to
+    /// load it (optionally with a non-fatal <paramref name="warning"/>) or
+    /// false with a populated <paramref name="discardReason"/> to reject it.
+    ///
+    /// <para>Three rejection paths, in priority order:</para>
+    /// <list type="number">
+    ///   <item>Env-explicit <c>KOSHI_INDEX_PATH</c> disagrees with the
+    ///   snapshot's <c>SourcePath</c> — the user is unambiguously asking
+    ///   for a different path, the snapshot is wrong.</item>
+    ///   <item>The source-on-disk fingerprint has changed since the
+    ///   snapshot was saved — the snapshot is stale, force re-index.</item>
+    ///   <item>The snapshot was copied between projects (its recorded
+    ///   <c>SnapshotPath</c> differs from where we'd write today AND its
+    ///   <c>SourcePath</c> is outside this project's root) — defensively
+    ///   discard to avoid silently serving cross-project results. Legacy
+    ///   snapshots without <c>SnapshotPath</c> get the same conservative
+    ///   treatment so behaviour doesn't change for them.</item>
+    /// </list>
+    ///
+    /// <para>The deliberate fix for issue #62 is that a snapshot whose
+    /// <c>SnapshotPath</c> matches our own <c>_persistence.Path</c> is
+    /// trusted regardless of containment — that's the user's case
+    /// (they indexed <c>C:/work/some-repo</c> from a server with cwd
+    /// elsewhere; the snapshot ended up in <c>./.koshi/index.json</c>
+    /// pointing at the explicit absolute path they passed). Trust the user.</para>
+    /// </summary>
+    private static bool IsSnapshotAcceptable(
+        IndexEnvelope envelope, out string? discardReason, out string? warning)
+    {
+        discardReason = null;
+        warning = null;
+
+        // In-memory corpora (from koshi_index) have no on-disk source — no
+        // containment or fingerprint check applies. Round-trip as-is.
+        if (envelope.SourcePath is null || envelope.SourcePath == ContentFingerprint.InMemorySource)
+            return true;
+
+        // Path 1: env-explicit KOSHI_INDEX_PATH mismatch (highest priority).
+        if (PathConfig.Default.IndexPathFromEnv)
+        {
+            var resolved = PathConfig.Default.IndexPath;
+            if (!string.Equals(resolved, envelope.SourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                discardReason = $"source path '{envelope.SourcePath}' differs from " +
+                                $"KOSHI_INDEX_PATH '{resolved}'";
+                return false;
+            }
         }
 
-        Console.Error.WriteLine(
-            $"[koshi] Loaded index snapshot: {envelope.Chunks.Count} chunks from " +
-            $"'{envelope.SourcePath ?? "(unknown)"}' (saved {envelope.SavedAt:u}).");
+        // Path 2: stale fingerprint.
+        if (envelope.ContentFingerprint is not null)
+        {
+            var current = ContentFingerprint.Compute(envelope.SourcePath, envelope.Enumeration);
+            if (current is null || !string.Equals(current, envelope.ContentFingerprint, StringComparison.Ordinal))
+            {
+                discardReason = $"content fingerprint for '{envelope.SourcePath}' " +
+                                $"changed since {envelope.SavedAt:u} — re-run koshi_index_directory";
+                return false;
+            }
+        }
+
+        // Path 3: cross-project copy defense. Only fires when env-var path is
+        // unset (when set, path-1 above is authoritative). A snapshot we
+        // wrote ourselves has SnapshotPath == _persistence.Path; anything
+        // else is either a legacy snapshot or a copy from another project.
+        var weWroteThis = envelope.SnapshotPath is not null
+            && _persistence.Path is not null
+            && string.Equals(
+                Path.GetFullPath(envelope.SnapshotPath),
+                _persistence.Path,
+                StringComparison.OrdinalIgnoreCase);
+
+        if (!PathConfig.Default.IndexPathFromEnv && !weWroteThis)
+        {
+            var root = PathConfig.Default.ProjectRoot;
+            var srcFull = Path.GetFullPath(envelope.SourcePath);
+            var underRoot = srcFull.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(srcFull, root, StringComparison.OrdinalIgnoreCase);
+            if (!underRoot)
+            {
+                discardReason = $"snapshot at '{_persistence.Path}' was not written by this " +
+                                $"project (recorded SnapshotPath='{envelope.SnapshotPath ?? "(legacy)"}'), " +
+                                $"and its source '{srcFull}' is outside project root '{root}'. " +
+                                $"If this is intentional, set KOSHI_INDEX_PATH='{srcFull}' to override.";
+                return false;
+            }
+        }
+
+        // Out-of-project but we wrote it ourselves — load with a sanity warning.
+        if (weWroteThis)
+        {
+            var root = PathConfig.Default.ProjectRoot;
+            var srcFull = Path.GetFullPath(envelope.SourcePath);
+            var underRoot = srcFull.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(srcFull, root, StringComparison.OrdinalIgnoreCase);
+            if (!underRoot)
+            {
+                warning = $"loaded snapshot whose source '{srcFull}' is outside " +
+                          $"project root '{root}'. Run koshi_clear_index if unexpected.";
+            }
+        }
+
+        return true;
     }
 
     private static void ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration)
@@ -647,6 +780,8 @@ public sealed class RetrievalTools
             _isIndexed = true;
             _snapshotLoadAttempted = true;
             _loadedFromSnapshot = false;
+            _snapshotDiscardReason = null;
+            _snapshotLoadWarning = null;
             // ReplaceIndex was called explicitly — clear any prior auto-index
             // failure cache so a future clear + retry isn't blocked by stale
             // throttle state (#31).

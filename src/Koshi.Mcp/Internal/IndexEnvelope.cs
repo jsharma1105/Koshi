@@ -37,6 +37,19 @@ internal sealed class IndexEnvelope
     public IndexEnumerationParams? Enumeration { get; set; }
 
     public List<Chunk> Chunks { get; set; } = [];
+
+    /// <summary>
+    /// Absolute, normalised path of the snapshot file at the moment it was
+    /// written. Used as a provenance signal on load: when the live
+    /// <see cref="IndexPersistence.Path"/> matches this, the snapshot is the
+    /// same file we wrote ourselves (so out-of-project source paths are
+    /// trustworthy — the user explicitly indexed an outside directory from
+    /// this same <c>.koshi/</c> location). A mismatch indicates the snapshot
+    /// file was copied between projects; legacy snapshots written before
+    /// this field existed have a null <see cref="SnapshotPath"/> and fall
+    /// through to the conservative containment check.
+    /// </summary>
+    public string? SnapshotPath { get; set; }
 }
 
 /// <summary>Parameters that determined which files <c>koshi_index_directory</c> enumerated.</summary>

@@ -88,6 +88,7 @@ internal sealed class IndexPersistence
                 ContentFingerprint = contentFingerprint,
                 Enumeration = enumeration,
                 Chunks = [.. chunks],
+                SnapshotPath = Path,
             };
             var json = JsonSerializer.Serialize(envelope, KoshiJsonContext.Default.IndexEnvelope);
 
