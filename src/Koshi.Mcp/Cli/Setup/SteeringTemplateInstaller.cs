@@ -87,7 +87,7 @@ internal static class SteeringTemplateInstaller
         string projectRoot,
         bool force)
     {
-        var target = Path.GetFullPath(Path.Combine(projectRoot, template.DestinationRelative));
+        var target = Path.GetFullPath(Path.Join(projectRoot, template.DestinationRelative));
         var body = template.Read();
 
         try

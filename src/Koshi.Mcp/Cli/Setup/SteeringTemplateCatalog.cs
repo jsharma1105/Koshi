@@ -76,7 +76,7 @@ internal static class SteeringTemplateCatalog
             return ("AGENTS.md", "AGENTS.md");
         if (resource.EndsWith(".koshi.copilot-instructions.md", StringComparison.Ordinal))
             return (".github/copilot-instructions.md",
-                    Path.Combine(".github", "copilot-instructions.md"));
+                    Path.Join(".github", "copilot-instructions.md"));
         if (resource.EndsWith(".koshi.cursorrules", StringComparison.Ordinal))
             return (".cursorrules", ".cursorrules");
         if (resource.EndsWith(".koshi.windsurfrules", StringComparison.Ordinal))

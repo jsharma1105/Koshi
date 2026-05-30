@@ -90,9 +90,9 @@ internal static class GitTemplateInstaller
                 ErrorMessage: "git is not on PATH; install git first.");
         }
 
-        var templateDir = Path.GetFullPath(Path.Combine(homeDir, DefaultDirName));
-        var hooksDir = Path.Combine(templateDir, "hooks");
-        var contentDir = Path.Combine(templateDir, ContentDirName);
+        var templateDir = Path.GetFullPath(Path.Join(homeDir, DefaultDirName));
+        var hooksDir = Path.Join(templateDir, "hooks");
+        var contentDir = Path.Join(templateDir, ContentDirName);
 
         // ── 1. Detect a conflicting pre-existing templatedir ───────────────
         // `git config --global --get` exits 1 when the key is unset (not an
@@ -148,7 +148,7 @@ internal static class GitTemplateInstaller
 
             foreach (var t in SteeringTemplateCatalog.Discover())
             {
-                var dest = Path.Combine(contentDir, t.DestinationRelative);
+                var dest = Path.Join(contentDir, t.DestinationRelative);
                 var destDir = Path.GetDirectoryName(dest);
                 if (!string.IsNullOrEmpty(destDir))
                     Directory.CreateDirectory(destDir);
@@ -157,7 +157,7 @@ internal static class GitTemplateInstaller
                 written.Add(dest);
             }
 
-            var hookPath = Path.Combine(hooksDir, HookFileName);
+            var hookPath = Path.Join(hooksDir, HookFileName);
             // POSIX sh chokes on a CRLF shebang. Always write the hook with
             // LF endings regardless of platform.
             var hookScript = BuildHookScript().Replace("\r\n", "\n");
@@ -280,7 +280,11 @@ internal static class GitTemplateInstaller
                 UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
-        catch
+        catch (Exception ex) when (
+            ex is IOException or
+            UnauthorizedAccessException or
+            PlatformNotSupportedException or
+            ArgumentException)
         {
             // Best-effort: a file that exists but cannot be chmodded is still
             // usable on a system where the user fixes perms manually.
@@ -293,7 +297,7 @@ internal static class GitTemplateInstaller
         if (value == "~") return homeDir;
         if (value.StartsWith("~/", StringComparison.Ordinal) ||
             value.StartsWith("~\\", StringComparison.Ordinal))
-            return Path.Combine(homeDir, value[2..]);
+            return Path.Join(homeDir, value[2..]);
         return value;
     }
 
@@ -309,7 +313,11 @@ internal static class GitTemplateInstaller
                 : StringComparison.Ordinal;
             return string.Equals(na, nb, cmp);
         }
-        catch
+        catch (Exception ex) when (
+            ex is ArgumentException or
+            PathTooLongException or
+            NotSupportedException or
+            System.Security.SecurityException)
         {
             return false;
         }

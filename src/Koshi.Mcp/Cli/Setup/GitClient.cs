@@ -36,7 +36,11 @@ internal sealed class ProcessGitRunner : IGitRunner
             var r = Run(Environment.CurrentDirectory, "--version");
             return r.Ok;
         }
-        catch
+        catch (Exception ex) when (
+            ex is System.ComponentModel.Win32Exception or
+            InvalidOperationException or
+            PlatformNotSupportedException or
+            IOException)
         {
             return false;
         }
@@ -117,7 +121,7 @@ internal static class GitClient
         if (trimmed.StartsWith("gh:", StringComparison.OrdinalIgnoreCase))
         {
             var slug = trimmed["gh:".Length..];
-            if (slug.Length == 0 || slug.Contains('/') == false)
+            if (slug.Length == 0 || !slug.Contains('/'))
                 throw new ArgumentException(
                     $"'gh:' shorthand requires owner/name, got '{raw}'", nameof(raw));
             if (!slug.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) slug += ".git";
@@ -180,7 +184,7 @@ internal static class GitClient
                 Detail: "git not found on PATH; install it from https://git-scm.com/");
 
         var resolvedRepo = ResolveRepoUrl(repoUrl);
-        var gitDir = Path.Combine(targetPath, ".git");
+        var gitDir = Path.Join(targetPath, ".git");
         var targetExists = Directory.Exists(targetPath);
         var gitDirExists = Directory.Exists(gitDir) || File.Exists(gitDir); // worktree support
 

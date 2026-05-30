@@ -57,7 +57,7 @@ internal static class ProjectRootResolver
         {
             foreach (var marker in s_markers)
             {
-                var candidate = Path.Combine(current, marker);
+                var candidate = Path.Join(current, marker);
                 if (File.Exists(candidate) || Directory.Exists(candidate))
                 {
                     return current;

@@ -133,7 +133,12 @@ internal static class KoshiEnvCheck
         if (env.TryGetValue("KOSHI_PROJECT_ROOT", out var raw) && !string.IsNullOrWhiteSpace(raw))
         {
             try { return Path.GetFullPath(raw!); }
-            catch { /* fall through to fallback */ }
+            catch (Exception ex) when (
+                ex is ArgumentException or
+                PathTooLongException or
+                NotSupportedException or
+                System.Security.SecurityException)
+            { /* fall through to fallback */ }
         }
         return Path.GetFullPath(fallbackRoot);
     }
