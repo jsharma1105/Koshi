@@ -82,6 +82,31 @@ Each persona ships in **two formats**:
   or `--dry-run` to preview.
 - Not telemetry. Nothing in this tool phones home.
 
+## Next steps
+
+After installing:
+
+```bash
+koshi-agents doctor    # verifies every detected client sees the server
+koshi-agents list      # shows the 5 personas you can use
+```
+
+Then open your MCP client — the personas appear under the Koshi namespace
+(`mcp__koshi__*` in Claude Code, `koshi/*` in Copilot CLI). Ask the agent
+any project question.
+
+## Known issues
+
+Hitting something unexpected? Search
+[open bugs](https://github.com/jsharma1105/Koshi/issues?q=is%3Aissue+is%3Aopen+label%3Abug)
+before assuming it's you. Most setup issues are covered in the
+[troubleshooting guide](https://github.com/jsharma1105/Koshi/blob/main/docs/troubleshooting.md).
+
+## Prerequisites
+
+- A working `koshi-mcp` on `PATH` (install [`Koshi.Mcp`](https://www.nuget.org/packages/Koshi.Mcp/) first, or use the [shell installer](https://github.com/jsharma1105/Koshi#install)).
+- .NET 10 SDK or runtime (required by `dotnet tool install`).
+
 ## License
 
 MIT — see [`LICENSE`](https://github.com/jsharma1105/Koshi/blob/main/LICENSE).

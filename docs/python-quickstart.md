@@ -174,7 +174,7 @@ configured, it shows the path. If the index is hot, it shows the chunk count.
 | **Diagnostics** | `version`, `health` |
 
 Full Python API: [`python/README.md`](../python/README.md).
-Full tool reference (every argument, every shape): [`src/Koshi.Mcp/README.md`](../src/Koshi.Mcp/README.md#available-tools-24).
+Full tool reference (every argument, every shape): [`docs/tools.md`](tools.md).
 
 ---
 
@@ -262,6 +262,6 @@ The Python package version and the binary version **must** match exactly.
 
 ## Next steps
 
-- [Read the comparison table](../src/Koshi.Mcp/README.md#why-koshi) to see how Koshi stacks up against MCP Memory, AWS KB Retrieval, and RAG SaaS.
+- [Read the comparison table](comparison.md) to see how Koshi stacks up against MCP Memory, AWS KB Retrieval, and RAG SaaS.
 - [Set up sub-agent personas](../AGENTS.md) if you also use Claude Code or GitHub Copilot CLI.
 - [File an issue](https://github.com/jsharma1105/Koshi/issues) — feedback shapes the next release.

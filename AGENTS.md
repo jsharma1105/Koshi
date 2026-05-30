@@ -53,7 +53,7 @@ Copilot CLI from a Python-only host. The agent-installer below is .NET-only.
    ```bash
    dotnet tool install --global Koshi.Mcp
    ```
-2. Configure it in your MCP client (see [`src/Koshi.Mcp/README.md`](./src/Koshi.Mcp/README.md) for Copilot CLI / Claude / Cursor / Windsurf snippets). The personas assume the server is registered under the name **`koshi`** — this matches the `mcp__koshi__*` tool-name prefix used in the Claude Code persona allow-lists.
+2. Configure it in your MCP client (see [`docs/client-setup.md`](./docs/client-setup.md) for Copilot CLI / Claude / Cursor / Windsurf snippets). The personas assume the server is registered under the name **`koshi`** — this matches the `mcp__koshi__*` tool-name prefix used in the Claude Code persona allow-lists.
 
 ### Native AOT binary (`koshi-mcp-<rid>`)
 

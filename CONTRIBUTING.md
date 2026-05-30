@@ -141,7 +141,7 @@ Releases are triggered by pushing a `v*.*.*` tag. The release workflow runs as a
    the `PYPI_API_TOKEN` secret).
 
 Maintainers: follow the checklist in
-[`src/Koshi.Mcp/README.md`](src/Koshi.Mcp/README.md#releasing) and the launch-day
+[`src/Koshi.Mcp/README.md`](src/Koshi.Mcp/README.md) and [`docs/development.md`](docs/development.md#releasing) plus the launch-day
 sequence in [`_local/marketing/release-day-checklist.md`](_local/marketing/release-day-checklist.md).
 
 ## License
