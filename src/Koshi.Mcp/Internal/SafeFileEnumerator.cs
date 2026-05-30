@@ -153,7 +153,12 @@ internal static class SafeFileEnumerator
             {
                 length = new FileInfo(file).Length;
             }
-            catch
+            catch (Exception ex) when (
+                ex is IOException or
+                UnauthorizedAccessException or
+                System.Security.SecurityException or
+                NotSupportedException or
+                PathTooLongException)
             {
                 continue;
             }

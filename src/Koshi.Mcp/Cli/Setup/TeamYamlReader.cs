@@ -236,8 +236,10 @@ internal static class TeamYamlReader
 
     private static string Unquote(string v)
     {
-        if (v.Length >= 2 &&
-            ((v[0] == '"' && v[^1] == '"') || (v[0] == '\'' && v[^1] == '\'')))
+        if (v.Length < 2) return v;
+        bool isDoubleQuoted = v[0] == '"' && v[^1] == '"';
+        bool isSingleQuoted = v[0] == '\'' && v[^1] == '\'';
+        if (isDoubleQuoted || isSingleQuoted)
         {
             return v[1..^1];
         }

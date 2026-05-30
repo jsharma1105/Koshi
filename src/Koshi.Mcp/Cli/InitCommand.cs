@@ -107,7 +107,7 @@ internal static class InitCommand
         TeamYaml? teamYml = null;
         if (!opts.SkipTeam)
         {
-            var yamlPath = Path.Combine(projectRoot, TeamYamlReader.FileName);
+            var yamlPath = Path.Join(projectRoot, TeamYamlReader.FileName);
             var read = TeamYamlReader.TryRead(yamlPath);
             if (read.Error is not null)
             {
@@ -176,7 +176,6 @@ internal static class InitCommand
                 {
                     stderr.WriteLine($"  vault: {vaultErr}");
                     stderr.WriteLine("         pass --accept-team-config to allow this path explicitly.");
-                    anyError = true;
                     return 4;
                 }
                 envToSet["KOSHI_MEMORY_VAULT"] = vaultAbs;
@@ -233,13 +232,13 @@ internal static class InitCommand
             var detectedClientSet = new HashSet<PersonaClient>(clients);
             bool wantCopilot = opts.AllTemplates
                 || detectedClientSet.Contains(PersonaClient.Copilot)
-                || File.Exists(Path.Combine(projectRoot, ".github", "copilot-instructions.md"));
+                || File.Exists(Path.Join(projectRoot, ".github", "copilot-instructions.md"));
             bool wantCursor = opts.AllTemplates
-                || Directory.Exists(Path.Combine(projectRoot, ".cursor"))
-                || File.Exists(Path.Combine(projectRoot, ".cursorrules"));
+                || Directory.Exists(Path.Join(projectRoot, ".cursor"))
+                || File.Exists(Path.Join(projectRoot, ".cursorrules"));
             bool wantWindsurf = opts.AllTemplates
-                || Directory.Exists(Path.Combine(projectRoot, ".windsurf"))
-                || File.Exists(Path.Combine(projectRoot, ".windsurfrules"));
+                || Directory.Exists(Path.Join(projectRoot, ".windsurf"))
+                || File.Exists(Path.Join(projectRoot, ".windsurfrules"));
 
             bool Filter(SteeringTemplate t) => t.Name switch
             {
@@ -329,7 +328,7 @@ internal static class InitCommand
 
             if (teamYml.Team is not null)
             {
-                var teamsFile = Path.Combine(projectRoot, ".koshi", "teams.json");
+                var teamsFile = Path.Join(projectRoot, ".koshi", "teams.json");
                 var regErr = RegisterTeam(teamsFile, teamYml.Team);
                 if (regErr is null)
                 {
@@ -388,7 +387,7 @@ internal static class InitCommand
         var isAbsolute = Path.IsPathRooted(declared);
         var resolved = isAbsolute
             ? Path.GetFullPath(declared)
-            : Path.GetFullPath(Path.Combine(projectRoot, declared));
+            : Path.GetFullPath(Path.Join(projectRoot, declared));
 
         if (!accept)
         {

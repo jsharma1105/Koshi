@@ -69,7 +69,7 @@ internal static class PersonaInstaller
     /// </summary>
     public static PersonaInstallResult InstallOne(Persona persona, string agentsDir, bool force)
     {
-        var target = Path.Combine(agentsDir, persona.FileName);
+        var target = Path.Join(agentsDir, persona.FileName);
         var exists = File.Exists(target);
         if (exists && !force)
             return new PersonaInstallResult(PersonaInstallOutcome.SkippedExists, target, persona.Name);
