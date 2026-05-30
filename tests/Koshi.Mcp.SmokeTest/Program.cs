@@ -16,6 +16,7 @@
 // IL3050 *runtime* surprise (not just build-time warnings) before we ship,
 // so this driver intentionally hits every code path the SDK touches.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -305,7 +306,7 @@ _ = Task.Run(async () =>
     }
 });
 
-var responses = new Dictionary<int, JsonElement>();
+var responses = new ConcurrentDictionary<int, JsonElement>();
 using var responseSignal = new SemaphoreSlim(0);
 
 _ = Task.Run(async () =>
@@ -413,7 +414,19 @@ var initResp = await RpcAsync("initialize", new
     capabilities = new { },
     clientInfo = new { name = "koshi-smoke", version = "0.4.0" }
 });
-if (initResp is null) { Console.Error.WriteLine("FAIL: no response to initialize"); KillAndExit(2); }
+if (initResp is null) { Console.Error.WriteLine("FAIL: no response to initialize"); KillAndExit(2); return 2; }
+// C6: assert the handshake actually negotiated a protocol version. Without
+// this, a server that silently echoes back an empty result object would
+// "pass" handshake and we'd discover the real failure 24 tool-calls later.
+var initRespVal = initResp.Value;
+if (!initRespVal.TryGetProperty("result", out var initResult) ||
+    !initResult.TryGetProperty("protocolVersion", out var protoVer) ||
+    protoVer.ValueKind != JsonValueKind.String ||
+    string.IsNullOrWhiteSpace(protoVer.GetString()))
+{
+    Console.Error.WriteLine($"FAIL: initialize response missing/empty result.protocolVersion. Raw: {initRespVal.GetRawText()}");
+    KillAndExit(2);
+}
 await SendNotificationAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
 
 // ─── Phase 2: tools/list — must enumerate all 24 tools ───────────────────
@@ -918,7 +931,7 @@ try
     vpsi.Environment.Remove("KOSHI_INDEX_PATH");
 
     var vproc = Process.Start(vpsi)!;
-    var vresponses = new Dictionary<int, JsonElement>();
+    var vresponses = new ConcurrentDictionary<int, JsonElement>();
     using var vsignal = new SemaphoreSlim(0);
     int vnextId = 1;
 
@@ -978,6 +991,13 @@ try
         clientInfo = new { name = "smoke-vault", version = "0.1" }
     });
     if (vinitResp is null) failures.Add("vault: initialize TIMEOUT");
+    else if (!vinitResp.Value.TryGetProperty("result", out var vinitResult) ||
+             !vinitResult.TryGetProperty("protocolVersion", out var vproto) ||
+             vproto.ValueKind != JsonValueKind.String ||
+             string.IsNullOrWhiteSpace(vproto.GetString()))
+    {
+        failures.Add($"vault: initialize response missing/empty result.protocolVersion: {vinitResp.Value.GetRawText()}");
+    }
     await vproc.StandardInput.WriteLineAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
     await vproc.StandardInput.FlushAsync();
 
@@ -1056,7 +1076,7 @@ External vault assertion body. Marker phantomzqx99201 for vault smoke test.
     // Shutdown vault proc.
     vproc.StandardInput.Close();
     vproc.WaitForExit(5000);
-    if (!vproc.HasExited) vproc.Kill();
+    if (!vproc.HasExited) vproc.Kill(entireProcessTree: true);
     Console.Error.WriteLine("[ok] vault smoke phase complete");
 }
 catch (Exception ex) when (
@@ -1108,7 +1128,7 @@ try
     dpsi.Environment.Remove("KOSHI_INDEX_PATH");
 
     var dproc = Process.Start(dpsi)!;
-    var dresponses = new Dictionary<int, JsonElement>();
+    var dresponses = new ConcurrentDictionary<int, JsonElement>();
     int dnextId = 1;
 
     _ = Task.Run(async () =>
@@ -1164,6 +1184,13 @@ try
         clientInfo = new { name = "smoke-defaults", version = "0.1" }
     });
     if (dinitResp is null) failures.Add("defaults: initialize TIMEOUT");
+    else if (!dinitResp.Value.TryGetProperty("result", out var dinitResult) ||
+             !dinitResult.TryGetProperty("protocolVersion", out var dproto) ||
+             dproto.ValueKind != JsonValueKind.String ||
+             string.IsNullOrWhiteSpace(dproto.GetString()))
+    {
+        failures.Add($"defaults: initialize response missing/empty result.protocolVersion: {dinitResp.Value.GetRawText()}");
+    }
     await dproc.StandardInput.WriteLineAsync("""{"jsonrpc":"2.0","method":"notifications/initialized"}""");
     await dproc.StandardInput.FlushAsync();
 
@@ -1199,7 +1226,7 @@ try
 
     dproc.StandardInput.Close();
     dproc.WaitForExit(5000);
-    if (!dproc.HasExited) dproc.Kill();
+    if (!dproc.HasExited) dproc.Kill(entireProcessTree: true);
     Console.Error.WriteLine("[ok] defaults smoke phase complete");
 }
 catch (Exception ex) when (
@@ -1223,7 +1250,7 @@ finally
 // ─── Shutdown ───────────────────────────────────────────────────────────
 proc.StandardInput.Close();
 proc.WaitForExit(5000);
-if (!proc.HasExited) proc.Kill();
+if (!proc.HasExited) proc.Kill(entireProcessTree: true);
 
 // Best-effort cleanup of the pre-seeded memory fixture directory.
 if (preSeededMemoryDir is not null)
@@ -1253,6 +1280,6 @@ return failures.Count;
 
 void KillAndExit(int code)
 {
-    if (!proc.HasExited) proc.Kill();
+    if (!proc.HasExited) proc.Kill(entireProcessTree: true);
     Environment.Exit(code);
 }

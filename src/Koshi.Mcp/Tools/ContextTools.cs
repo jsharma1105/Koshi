@@ -220,7 +220,7 @@ public sealed class ContextTools
                 KoshiOutputJsonContext.Default.JsonEnvelopeTokenCountResultData);
         }
 
-        return $"{count} tokens ({text.Length} characters, ratio: {(float)text.Length / count:F1} chars/token)";
+        return $"{count} tokens ({text.Length} characters, ratio: {(count > 0 ? ((float)text.Length / count).ToString("F1") : "n/a")} chars/token)";
     }
 
     [McpServerTool(Name = "koshi_budget_plan"), Description(

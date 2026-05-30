@@ -72,6 +72,10 @@ internal sealed class IndexWatcher : IDisposable
     {
         get { lock (_pendingLock) return _pending.Count; }
     }
+    public bool PendingOverflowed
+    {
+        get { lock (_pendingLock) return _pendingOverflowed; }
+    }
     public int TotalRebuilds => _totalRebuilds;
     public DateTimeOffset? LastEventAt => _lastEventAt;
     public DateTimeOffset? LastRebuildAt => _lastRebuildAt;
@@ -81,6 +85,14 @@ internal sealed class IndexWatcher : IDisposable
     private readonly Func<IEnumerable<string>> _pollEnumerator;
     private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _pendingLock = new();
+    // Cap on the pending set so a runaway producer (e.g. a script rewriting
+    // half the tree in a tight loop) cannot grow the queue without bound and
+    // OOM the process. When the cap is hit we drop the new path and force a
+    // root-sentinel for a full reconciliation on the next drain — losing
+    // per-path fidelity is acceptable here because the drain already
+    // re-stats each path from disk. (Opus multi-model review #6.)
+    internal const int MaxPendingEvents = 50_000;
+    private bool _pendingOverflowed;
     private readonly SemaphoreSlim _signal = new(0, int.MaxValue);
     private readonly CancellationTokenSource _cts = new();
     private readonly FileSystemWatcher? _fsw;
@@ -248,14 +260,27 @@ internal sealed class IndexWatcher : IDisposable
 
         bool exists = isDirectory || isFile;
 
-        if (isDirectory && SafeFileEnumerator.IsExcludedDirectoryPath(fullPath)) return;
-        if (!exists && SafeFileEnumerator.IsExcludedDirectoryPath(fullPath)) return;
+        if (isDirectory && SafeFileEnumerator.IsExcludedDirectoryPath(fullPath, RootPath)) return;
+        if (!exists && SafeFileEnumerator.IsExcludedDirectoryPath(fullPath, RootPath)) return;
         if (!isRootSentinel && exists && !isDirectory && !_pathPredicate(fullPath)) return;
 
         bool added;
         lock (_pendingLock)
         {
-            added = _pending.Add(rel);
+            if (_pending.Count >= MaxPendingEvents && !_pending.Contains(rel))
+            {
+                // Bypass per-path fidelity once we hit the cap: replace the
+                // queue with a single root-sentinel that forces a full
+                // reconciliation on the next drain. Idempotent.
+                _pending.Clear();
+                _pending.Add(".");
+                _pendingOverflowed = true;
+                added = true;
+            }
+            else
+            {
+                added = _pending.Add(rel);
+            }
         }
         if (added)
         {
@@ -445,6 +470,33 @@ internal sealed class IndexWatcher : IDisposable
                 _fsw.Dispose();
             }
             catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or IOException) { _ = ex; }
+        }
+
+        // Await the worker + poll tasks so a Dispose returning to the caller
+        // truly means "no more drain callbacks will fire". Without this a
+        // pending drain could still call back into a consumer whose state
+        // the caller is about to tear down (e.g. test teardown clobbering
+        // _indexedChunks). (Opus multi-model review #7.)
+        var tasks = new List<Task>(2);
+        if (_workerTask is not null) tasks.Add(_workerTask);
+        if (_pollTask is not null) tasks.Add(_pollTask);
+        if (tasks.Count > 0)
+        {
+            try
+            {
+                // 5s cap — we'd rather force-shutdown than block a host
+                // process indefinitely on a runaway drain callback.
+                Task.WhenAll(tasks).Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (AggregateException ex)
+            {
+                // Expected: TaskCanceledException from the cancelled CTS.
+                foreach (var inner in ex.Flatten().InnerExceptions)
+                {
+                    if (inner is not OperationCanceledException)
+                        Console.Error.WriteLine($"[koshi] IndexWatcher worker shutdown: {inner.Message}");
+                }
+            }
         }
 
         try { _signal.Dispose(); }

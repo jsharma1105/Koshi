@@ -177,9 +177,7 @@ internal static class McpConfigWriter
         // Append a trailing newline to keep editors and `git diff` happy.
         var payload = json + Environment.NewLine;
 
-        var tmp = path + ".koshi-tmp";
-        File.WriteAllText(tmp, payload);
-        File.Move(tmp, path, overwrite: true);
+        Internal.AtomicFileWriter.WriteAllText(path, payload);
     }
 
     private static string SnapshotBackup(string path)

@@ -59,6 +59,12 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
         var writes = 0;
         var skips = 0;
         var errors = 0;
+        // Real "skip all" sentinel — once the user picks "skip all" once, all
+        // remaining existing-file conflicts are silently skipped without
+        // re-prompting. The previous reflection-on-Force hack didn't actually
+        // change the loop's prompt behaviour, so the user was re-prompted on
+        // every file. (Codex multi-model review C1.)
+        var skipAllExisting = false;
         var mcpResults = new List<(PersonaClient Client, McpRegisterResult Result)>();
 
         foreach (var client in clients)
@@ -98,6 +104,13 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
 
                 if (exists && !settings.Force)
                 {
+                    if (skipAllExisting)
+                    {
+                        skips++;
+                        AnsiConsole.MarkupLine($"  [grey]skipped       [/] {Markup.Escape(target)}");
+                        continue;
+                    }
+
                     var choice = AnsiConsole.Prompt(
                         new SelectionPrompt<string>()
                             .Title($"  [yellow]Exists:[/] {Markup.Escape(target)}")
@@ -111,11 +124,8 @@ internal sealed class InstallCommand : Command<InstallCommand.Settings>
                     if (choice == "skip all")
                     {
                         skips++;
-                        AnsiConsole.MarkupLine($"  [grey]skipped       [/] {Markup.Escape(target)}");
-                        settings.GetType().GetProperty(nameof(Settings.Force))?
-                            .SetValue(settings, false);
-                        // Treat remaining existing files as skips by re-using Force=false +
-                        // setting a sentinel. For simplicity, just keep prompting on other files.
+                        skipAllExisting = true;
+                        AnsiConsole.MarkupLine($"  [grey]skipped       [/] {Markup.Escape(target)} (suppressing further prompts)");
                         continue;
                     }
                 }

@@ -104,6 +104,13 @@ public sealed class RetrievalTools
     private static DateTimeOffset _lastAutoIndexAttempt = DateTimeOffset.MinValue;
     private static string? _lastAutoIndexFailureMessage;
     private static readonly TimeSpan AutoIndexRetryAfter = TimeSpan.FromSeconds(30);
+    // Dedicated lock for the auto-index throttle state so the "is the retry
+    // window still open?" read and the "I'm the thread that's going to retry"
+    // write happen atomically. Without it two concurrent Search() calls can
+    // both observe a stale failure message, both record themselves as the
+    // current attempt, and both re-run the (potentially slow) directory
+    // scan. (Sonnet multi-model review S2.)
+    private static readonly object _autoIndexLock = new();
 
     static RetrievalTools()
     {
@@ -560,13 +567,31 @@ public sealed class RetrievalTools
             // hasn't elapsed, surface the cached failure WITHOUT re-running
             // the (potentially slow) directory enumeration. Outside the
             // window, retry — this is the #31 fix vs. the old one-shot block.
-            var now = DateTimeOffset.UtcNow;
-            var sinceLastAttempt = now - _lastAutoIndexAttempt;
-            if (_lastAutoIndexFailureMessage is not null && sinceLastAttempt < AutoIndexRetryAfter)
+            // All reads/writes of the throttle state happen under
+            // _autoIndexLock to keep the check-and-update atomic.
+            string? throttledMessage = null;
+            TimeSpan throttledRetryIn = TimeSpan.Zero;
+            bool shouldRunAutoIndex = false;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            lock (_autoIndexLock)
             {
-                var retryIn = AutoIndexRetryAfter - sinceLastAttempt;
-                var textMsg = _lastAutoIndexFailureMessage +
-                       $"\n(next auto-retry in {Math.Max(1, (int)Math.Ceiling(retryIn.TotalSeconds))}s; " +
+                var sinceLastAttempt = now - _lastAutoIndexAttempt;
+                if (_lastAutoIndexFailureMessage is not null && sinceLastAttempt < AutoIndexRetryAfter)
+                {
+                    throttledMessage = _lastAutoIndexFailureMessage;
+                    throttledRetryIn = AutoIndexRetryAfter - sinceLastAttempt;
+                }
+                else
+                {
+                    _lastAutoIndexAttempt = now;
+                    shouldRunAutoIndex = true;
+                }
+            }
+
+            if (throttledMessage is not null)
+            {
+                var textMsg = throttledMessage +
+                       $"\n(next auto-retry in {Math.Max(1, (int)Math.Ceiling(throttledRetryIn.TotalSeconds))}s; " +
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
                 if (fmt == OutputFormat.Json)
                     return OutputFormatting.Error<SearchResultData>(
@@ -577,7 +602,9 @@ public sealed class RetrievalTools
                 return textMsg;
             }
 
-            _lastAutoIndexAttempt = now;
+            // Defensive: must have set shouldRunAutoIndex above.
+            if (!shouldRunAutoIndex) throw new InvalidOperationException("auto-index throttle state inconsistent");
+
             Console.Error.WriteLine($"[koshi] auto-indexing from KOSHI_INDEX_PATH='{envPath}'");
             // IndexDirectory was made async in #69 to support awaited progress
             // notifications; the synchronous auto-index path stays sync to keep
@@ -590,7 +617,7 @@ public sealed class RetrievalTools
             if (auto.StartsWith('❌'))
             {
                 var failureMsg = "❌ No documents indexed. Auto-index from KOSHI_INDEX_PATH failed:\n" + auto;
-                _lastAutoIndexFailureMessage = failureMsg;
+                lock (_autoIndexLock) { _lastAutoIndexFailureMessage = failureMsg; }
                 var withRetry = failureMsg +
                        $"\n(next auto-retry in {AutoIndexRetryAfter.TotalSeconds:F0}s; " +
                        $"call koshi_index_directory(\"{envPath}\") to retry immediately)";
@@ -604,7 +631,7 @@ public sealed class RetrievalTools
             }
 
             // Success: clear the failure cache so subsequent re-clears + retries start fresh.
-            _lastAutoIndexFailureMessage = null;
+            lock (_autoIndexLock) { _lastAutoIndexFailureMessage = null; }
         }
 
         KeywordRetriever retriever;
@@ -1382,7 +1409,7 @@ public sealed class RetrievalTools
             if (snapshotPath is not null
                 && string.Equals(Path.GetFullPath(fullPath), snapshotPath + ".tmp", StringComparison.OrdinalIgnoreCase))
                 return false;
-            return SafeFileEnumerator.IsPathLikelyIndexed(fullPath, pattern);
+            return SafeFileEnumerator.IsPathLikelyIndexed(fullPath, pattern, rootFull);
         }
 
         IEnumerable<string> PollEnumerator()
@@ -1546,7 +1573,7 @@ public sealed class RetrievalTools
             // If file exists and is currently indexable, re-read and add chunks.
             if (File.Exists(fullPath))
             {
-                if (!SafeFileEnumerator.IsCurrentlyIndexable(fullPath, pattern, maxBytes)) continue;
+                if (!SafeFileEnumerator.IsCurrentlyIndexable(fullPath, pattern, maxBytes, rootPath: rootFull)) continue;
                 if (TryReadAndChunk(fullPath, rel, chunker, out var fileChunks, out var fileErr))
                     byPath[Normalize(rel)] = fileChunks;
                 else if (fileErr is not null) { anyError = true; firstErrorMessage ??= fileErr; }

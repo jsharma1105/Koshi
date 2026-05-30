@@ -59,8 +59,14 @@ internal static class SafeFileEnumerator
     /// file that was indexed at session start but has since been deleted.
     /// File-state checks (size / readability) belong to
     /// <see cref="IsCurrentlyIndexable"/>.
+    ///
+    /// <para>Pass <paramref name="rootPath"/> so the hidden-directory exclusion
+    /// only considers ancestors *beneath* the indexed root. Otherwise a project
+    /// living under <c>~/.dotfiles/work/repo</c> would have every file dropped
+    /// because <c>.dotfiles</c> appears in the ancestry. (Opus multi-model
+    /// review #9.)</para>
     /// </remarks>
-    public static bool IsPathLikelyIndexed(string fullPath, string? globPattern)
+    public static bool IsPathLikelyIndexed(string fullPath, string? globPattern, string? rootPath = null)
     {
         if (string.IsNullOrEmpty(fullPath)) return false;
 
@@ -68,7 +74,7 @@ internal static class SafeFileEnumerator
         var fileName = Path.GetFileName(fullPath);
         var ext = Path.GetExtension(fullPath).ToLowerInvariant();
 
-        if (IsExcludedDirectory(normalized)) return false;
+        if (IsExcludedDirectory(normalized, NormalizeRoot(rootPath))) return false;
         if (IsExcludedFile(fileName, ext)) return false;
 
         if (!string.IsNullOrEmpty(globPattern))
@@ -92,9 +98,9 @@ internal static class SafeFileEnumerator
     /// (a previously-indexed deleted file still needs its chunks removed,
     /// which the path-based predicate above is for).
     /// </summary>
-    public static bool IsCurrentlyIndexable(string fullPath, string? globPattern, long maxBytes)
+    public static bool IsCurrentlyIndexable(string fullPath, string? globPattern, long maxBytes, string? rootPath = null)
     {
-        if (!IsPathLikelyIndexed(fullPath, globPattern)) return false;
+        if (!IsPathLikelyIndexed(fullPath, globPattern, rootPath)) return false;
 
         try
         {
@@ -128,6 +134,7 @@ internal static class SafeFileEnumerator
         };
 
         int yielded = 0;
+        var normalizedRoot = NormalizeRoot(rootPath);
         foreach (var file in Directory.EnumerateFiles(rootPath, "*", enumerationOptions))
         {
             if (yielded >= maxFiles) yield break;
@@ -136,7 +143,7 @@ internal static class SafeFileEnumerator
             var fileName = Path.GetFileName(file);
             var ext = Path.GetExtension(file).ToLowerInvariant();
 
-            if (IsExcludedDirectory(normalized)) continue;
+            if (IsExcludedDirectory(normalized, normalizedRoot)) continue;
             if (IsExcludedFile(fileName, ext)) continue;
 
             if (!string.IsNullOrEmpty(globPattern))
@@ -176,23 +183,56 @@ internal static class SafeFileEnumerator
     /// <c>IndexWatcher</c> to decide whether to drop directory events before
     /// they hit the drain. Operates on a normalized full path; appends a
     /// trailing <c>/</c> so the segment-contains check is reliable for the
-    /// directory leaf itself.
+    /// directory leaf itself. Pass <paramref name="rootPath"/> so dot-prefix
+    /// ancestor segments above the indexed root are ignored — otherwise a
+    /// project living under <c>~/.dotfiles/work/repo</c> would have every
+    /// directory event dropped. (Opus multi-model review #9.)
     /// </summary>
-    public static bool IsExcludedDirectoryPath(string fullPath)
+    public static bool IsExcludedDirectoryPath(string fullPath, string? rootPath = null)
     {
         if (string.IsNullOrWhiteSpace(fullPath)) return true;
         var normalized = fullPath.Replace('\\', '/').TrimEnd('/') + "/";
-        return IsExcludedDirectory(normalized);
+        return IsExcludedDirectory(normalized, NormalizeRoot(rootPath));
     }
 
-    private static bool IsExcludedDirectory(string normalizedPath)
+    private static string? NormalizeRoot(string? rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath)) return null;
+        var n = rootPath.Replace('\\', '/').TrimEnd('/');
+        return n.Length == 0 ? null : n + "/";
+    }
+
+    private static bool IsExcludedDirectory(string normalizedPath, string? normalizedRoot = null)
     {
         if (ExcludedDirectorySegments.Any(seg => normalizedPath.Contains(seg, StringComparison.OrdinalIgnoreCase)))
             return true;
 
         // Exclude any path segment that starts with '.' (hidden dir convention)
         // except for a small allow-list of conventional, safe directories.
-        return normalizedPath.Split('/').Any(part =>
+        // When a root is supplied, only consider segments BELOW the root so a
+        // project living under e.g. ~/.dotfiles/repo isn't wholesale excluded
+        // because of an ancestor that the user has no control over. The check
+        // is OS-aware: case-insensitive on Windows/macOS, case-sensitive on
+        // Linux (matches the filesystem semantics that produced the path).
+        var pathToScan = normalizedPath;
+        if (normalizedRoot is not null)
+        {
+            var rootCmp = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (normalizedPath.StartsWith(normalizedRoot, rootCmp))
+                pathToScan = normalizedPath[normalizedRoot.Length..];
+            else
+            {
+                var trimmedRoot = normalizedRoot.TrimEnd('/');
+                if (string.Equals(normalizedPath.TrimEnd('/'), trimmedRoot, rootCmp))
+                    pathToScan = string.Empty;
+            }
+        }
+
+        if (pathToScan.Length == 0) return false;
+
+        return pathToScan.Split('/').Any(part =>
             part.Length > 1 && part[0] == '.' && part is not ".github" and not ".vscode-test");
     }
 

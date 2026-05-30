@@ -118,6 +118,17 @@ internal static class GitClient
             throw new ArgumentException("repo URL must not be empty", nameof(raw));
 
         var trimmed = raw.Trim();
+
+        // Refuse leading `-` so a malicious .koshi-team.yml can't sneak
+        // a git option through `git clone <url> <path>`. We also pass
+        // `--` to the runner below, but defense in depth: rejecting at
+        // the parser layer means a bad URL never reaches a child process.
+        // (Opus multi-model review #2.)
+        if (trimmed.StartsWith('-'))
+            throw new ArgumentException(
+                $"repo URL must not begin with '-' (got '{raw}'); refused to avoid passing as a git option",
+                nameof(raw));
+
         if (trimmed.StartsWith("gh:", StringComparison.OrdinalIgnoreCase))
         {
             var slug = trimmed["gh:".Length..];
@@ -208,7 +219,11 @@ internal static class GitClient
             if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
                 Directory.CreateDirectory(parent);
 
-            var clone = runner.Run(parent ?? ".", "clone", resolvedRepo, targetPath);
+            // `--` ends git's option parsing so a URL that somehow contains
+            // a leading hyphen (ResolveRepoUrl rejects those, but belt-and-
+            // braces) is treated as a positional argument, not as a flag.
+            // (Opus multi-model review #2.)
+            var clone = runner.Run(parent ?? ".", "clone", "--", resolvedRepo, targetPath);
             if (!clone.Ok)
             {
                 return new GitSyncResult(GitSyncOutcome.NetworkError, targetPath,

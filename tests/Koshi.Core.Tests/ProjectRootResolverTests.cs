@@ -112,6 +112,39 @@ public sealed class ProjectRootResolverTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    // Regression for the O3 multi-model finding: on Windows, IsInside MUST
+    // compare paths case-insensitively (C:\Repo and c:\repo refer to the same
+    // directory). On Linux, it MUST compare case-sensitively (/repo and /Repo
+    // are different). The helper is OS-aware as of the multi-model fix.
+    [Fact]
+    public void IsInside_uses_OS_appropriate_case_sensitivity()
+    {
+        var root = NewTempDir();
+        try
+        {
+            // Same logical directory, mixed casing.
+            var upper = root.ToUpperInvariant();
+            var lower = root.ToLowerInvariant();
+            if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+            {
+                // Default Windows + APFS are case-insensitive — must accept.
+                Assert.True(ProjectRootResolver.IsInside(root, upper));
+                Assert.True(ProjectRootResolver.IsInside(root, lower));
+                Assert.True(ProjectRootResolver.IsInside(upper, lower));
+            }
+            else
+            {
+                // Linux is case-sensitive. Lower/upper of a path created with
+                // mixed casing is NOT the same directory.
+                if (!string.Equals(upper, root, StringComparison.Ordinal))
+                    Assert.False(ProjectRootResolver.IsInside(root, upper));
+                if (!string.Equals(lower, root, StringComparison.Ordinal))
+                    Assert.False(ProjectRootResolver.IsInside(root, lower));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static string NewTempDir()
     {
         var p = Path.Combine(Path.GetTempPath(), "koshi-init-" + Guid.NewGuid().ToString("N"));

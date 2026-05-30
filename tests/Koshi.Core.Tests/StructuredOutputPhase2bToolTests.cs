@@ -171,6 +171,25 @@ public sealed class StructuredOutputPhase2bToolTests : IDisposable
         AssertErrorEnvelope(output, "empty_subject", expectedTool: "koshi_forget");
     }
 
+    // Multi-model review S1: koshi_forget's tool description promises
+    // case-insensitive substring matching against the subject. Prior to the
+    // fix the implementation used Equals which silently dropped every
+    // forget call whose argument wasn't an exact whole-subject match. Lock
+    // the substring semantics in so the contract can't regress again.
+    [Fact]
+    public void Forget_matches_subject_via_case_insensitive_substring()
+    {
+        var unique = "psql-substring-" + Guid.NewGuid().ToString("N")[..8];
+        MemoryTools.Remember("decision body", subject: $"we use {unique} for auth", type: "Decision");
+
+        // Lower-case partial match should still remove the row.
+        var output = MemoryTools.Forget(unique.ToLowerInvariant(), format: "json");
+        var data = AssertOkEnvelope(output, expectedTool: "koshi_forget");
+
+        Assert.True(data.GetProperty("removed").GetInt32() >= 1,
+            "Forget should match via case-insensitive substring, not Equals");
+    }
+
     // ════════════════════════ koshi_clear_memories ═════════════════════════
 
     [Fact]

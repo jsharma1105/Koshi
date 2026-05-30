@@ -209,19 +209,27 @@ public sealed class SessionOrchestrator
 
     // ── Fallback Handling ───────────────────────────────────────────────
 
+    // Max number of fallback retries before we surface failure. Without a
+    // bound, a fallback strategy that always returns ShouldRetry=true would
+    // recurse until the stack overflows. (Codex multi-model review H1.)
+    private const int MaxFallbackRetries = 5;
+
     private async Task<TurnResult> HandleFallbackAsync(
         SessionTurnContext ctx,
         HarnessPipelineConfig config,
         Exception originalException,
-        CancellationToken ct)
+        CancellationToken ct,
+        int depth = 0)
     {
         var failure = ClassifyFailure(originalException);
         var decision = _fallbackStrategy.NextFallback(ctx.FallbackLevel, failure, ctx);
 
-        if (!decision.ShouldRetry)
+        if (!decision.ShouldRetry || depth >= MaxFallbackRetries)
         {
             ctx.FallbackLevel = FallbackLevel.Failed;
-            ctx.FallbackReasons.Add(decision.Reason);
+            ctx.FallbackReasons.Add(depth >= MaxFallbackRetries
+                ? $"Max fallback depth ({MaxFallbackRetries}) reached: {decision.Reason}"
+                : decision.Reason);
             ctx.LlmResponse = $"I'm unable to process this request. Error: {originalException.Message}";
             FinalizeAndTrack(ctx, config);
             return BuildResult(ctx);
@@ -237,8 +245,9 @@ public sealed class SessionOrchestrator
         }
         catch (Exception retryEx)
         {
-            // Recurse — will eventually hit Failed level
-            return await HandleFallbackAsync(ctx, adjustedConfig, retryEx, ct);
+            // Recurse with incremented depth — will hit MaxFallbackRetries
+            // even if the strategy never returns ShouldRetry=false.
+            return await HandleFallbackAsync(ctx, adjustedConfig, retryEx, ct, depth + 1);
         }
     }
 

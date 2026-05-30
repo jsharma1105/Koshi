@@ -98,14 +98,14 @@ internal static class SteeringTemplateInstaller
 
             if (!File.Exists(target))
             {
-                File.WriteAllText(target, body);
+                Internal.AtomicFileWriter.WriteAllText(target, body);
                 return new TemplateInstallResult(
                     TemplateInstallOutcome.Written, target, template.Name);
             }
 
             if (force)
             {
-                File.WriteAllText(target, body);
+                Internal.AtomicFileWriter.WriteAllText(target, body);
                 return new TemplateInstallResult(
                     TemplateInstallOutcome.Overwrote, target, template.Name);
             }
@@ -119,9 +119,12 @@ internal static class SteeringTemplateInstaller
 
             // Append with a sensible gap so we don't fuse the snippet into a
             // previous block. Preserve any final newline already in the file.
+            // AtomicFileWriter.AppendAllText reads + writes via temp+rename so
+            // a crash mid-append leaves the original file intact rather than
+            // a partial blob. (Opus multi-model review #5.)
             var needsLeadingNewline = !existing.EndsWith('\n');
             var prefix = needsLeadingNewline ? "\n\n" : "\n";
-            File.AppendAllText(target, prefix + body);
+            Internal.AtomicFileWriter.AppendAllText(target, prefix + body);
             return new TemplateInstallResult(
                 TemplateInstallOutcome.Appended, target, template.Name);
         }

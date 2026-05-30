@@ -210,9 +210,36 @@ internal sealed class PathConfig
 
     private (string path, bool fromEnv) Resolve(string? raw, string defaultValue)
     {
+        // Each var resolves independently so one malformed env var doesn't
+        // poison the whole config (and thus prevent server startup). On
+        // failure we fall back to the cwd-derived default for THAT var only
+        // and emit a stderr diagnostic naming the offender. (Opus
+        // multi-model review #12.)
         if (!IsSet(raw))
-            return (Path.GetFullPath(defaultValue), false);
-        return (ResolveAgainstRoot(raw!), true);
+        {
+            try { return (Path.GetFullPath(defaultValue), false); }
+            catch (Exception ex) when (ex is ArgumentException or PathTooLongException
+                or NotSupportedException or SecurityException)
+            {
+                Console.Error.WriteLine(
+                    $"[koshi] WARN: PathConfig default '{defaultValue}' is invalid ({ex.GetType().Name}: {ex.Message}); using raw value");
+                return (defaultValue, false);
+            }
+        }
+
+        try { return (ResolveAgainstRoot(raw!), true); }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException
+            or NotSupportedException or SecurityException)
+        {
+            Console.Error.WriteLine(
+                $"[koshi] WARN: env value '{raw}' is not a valid path ({ex.GetType().Name}: {ex.Message}); falling back to default");
+            try { return (Path.GetFullPath(defaultValue), false); }
+            catch (Exception ex2) when (ex2 is ArgumentException or PathTooLongException
+                or NotSupportedException or SecurityException)
+            {
+                return (defaultValue, false);
+            }
+        }
     }
 
     private string ResolveAgainstRoot(string raw)

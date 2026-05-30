@@ -67,8 +67,12 @@ public sealed class FixedSizeChunker : IChunker
 
                 currentChunk = overlapLines;
                 currentTokens = overlapTokenCount;
-                // Next chunk starts at current line minus overlap lines
-                chunkStartLine = lineOffset - overlapLines.Count;
+                // Next chunk starts at current line minus overlap lines.
+                // Guard against negative offset in pathological cases where
+                // a single very-long line gets re-counted as overlap and
+                // exceeds the current line position. (Codex multi-model
+                // review H2.)
+                chunkStartLine = Math.Max(0, lineOffset - overlapLines.Count);
             }
 
             currentChunk.Add(line);

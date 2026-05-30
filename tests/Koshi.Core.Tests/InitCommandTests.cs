@@ -252,9 +252,10 @@ public sealed class InitCommandTests
             Assert.Equal(Path.Combine(cwd, ".koshi", "vault"),
                 ((string)env["KOSHI_MEMORY_VAULT"]!).TrimEnd(Path.DirectorySeparatorChar));
 
-            // git clone was invoked with the expanded URL.
+            // git clone was invoked with the expanded URL, after `--` separator.
             Assert.Contains(fake.Calls, c => c.Args[0] == "clone"
-                && c.Args[1] == "https://github.com/my-org/vault.git");
+                && c.Args[1] == "--"
+                && c.Args[2] == "https://github.com/my-org/vault.git");
 
             // Team file was written under <projectRoot>/.koshi/teams.json.
             var teamsFile = Path.Combine(cwd, ".koshi", "teams.json");

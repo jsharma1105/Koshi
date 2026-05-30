@@ -101,9 +101,7 @@ internal sealed class IndexPersistence
             };
             var json = JsonSerializer.Serialize(envelope, KoshiJsonContext.Default.IndexEnvelope);
 
-            var tempPath = Path + ".tmp";
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, Path, overwrite: true);
+            AtomicFileWriter.WriteAllText(Path, json);
             return true;
         }
         catch (Exception ex) when (

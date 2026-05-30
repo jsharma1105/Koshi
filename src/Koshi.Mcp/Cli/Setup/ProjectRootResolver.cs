@@ -88,7 +88,18 @@ internal static class ProjectRootResolver
         var root = Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var target = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var rootWithSep = root + Path.DirectorySeparatorChar;
-        return string.Equals(target, root, StringComparison.OrdinalIgnoreCase)
-            || target.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase);
+
+        // Filesystem case-sensitivity matches the OS:
+        //   • Windows / macOS (default HFS+/APFS) → case-insensitive
+        //   • Linux / case-sensitive APFS volumes → case-sensitive
+        // OrdinalIgnoreCase everywhere was wrong on Linux: a vault.path of
+        // `../REPO/escape` would slip past the in-project check when the
+        // real repo was `/home/u/repo`. (Opus multi-model review #3.)
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        return string.Equals(target, root, comparison)
+            || target.StartsWith(rootWithSep, comparison);
     }
 }

@@ -76,7 +76,7 @@ internal static class PersonaInstaller
 
         try
         {
-            File.WriteAllText(target, persona.Read());
+            Internal.AtomicFileWriter.WriteAllText(target, persona.Read());
             return new PersonaInstallResult(
                 exists ? PersonaInstallOutcome.Overwrote : PersonaInstallOutcome.Written,
                 target, persona.Name);

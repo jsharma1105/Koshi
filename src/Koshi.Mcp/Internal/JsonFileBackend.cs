@@ -86,9 +86,7 @@ internal sealed class JsonFileBackend : IMemoryBackend
             };
             var json = JsonSerializer.Serialize(envelope, KoshiJsonContext.Default.PersistenceEnvelope);
 
-            var tempPath = Path + ".tmp";
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, Path, overwrite: true);
+            AtomicFileWriter.WriteAllText(Path, json);
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or SecurityException
