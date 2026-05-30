@@ -229,13 +229,14 @@ public sealed class ToolIntrospectTests
         Assert.DoesNotContain("cancellationToken", paramNames);
         Assert.DoesNotContain("server", paramNames);
 
-        // The user-facing surface must remain exactly these eight params
-        // (format added by Phase 2b structured-output wiring, issue #66).
+        // The user-facing surface must remain exactly these nine params
+        // (format added by Phase 2b structured-output wiring, issue #66;
+        // watch added by #78 Gap D IndexWatcher activation).
         Assert.Equal(
             new[]
             {
                 "path", "pattern", "maxFileSizeKb", "maxFiles",
-                "maxTokens", "overlapTokens", "corpus", "format",
+                "maxTokens", "overlapTokens", "corpus", "format", "watch",
             },
             paramNames);
     }

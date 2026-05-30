@@ -100,13 +100,27 @@ internal static class JsonShapes
         string? Path,
         PersistenceData Persistence,
         string? SnapshotLoadWarning,
-        List<NamedCorpusData> NamedCorpora);
+        List<NamedCorpusData> NamedCorpora,
+        IndexWatcherData IndexWatcher);
 
     public sealed record NamedCorpusData(
         string Name,
         int Chunks,
         int Sources,
         string? Path);
+
+    public sealed record IndexWatcherData(
+        string Mode,
+        string Status,
+        string? Root,
+        bool Degraded,
+        string? DegradedReason,
+        int PendingEvents,
+        int TotalRebuilds,
+        DateTimeOffset? LastEventAt,
+        DateTimeOffset? LastRebuildAt,
+        int DebounceMs,
+        int PollIntervalSeconds);
 
     public sealed record HealthMemoryData(
         int RecordCount,

@@ -37,9 +37,10 @@ internal sealed record TemplateInstallResult(
 /// </list>
 ///
 /// <para>
-/// Every shipped template contains the literal string <c>"Koshi MCP discipline"</c>
-/// as the install marker, which keeps subsequent <c>koshi-mcp init</c> runs
-/// idempotent without depending on file hashes.
+/// Every shipped template contains the literal install marker
+/// <c>"koshi-mcp:steering-template:v1"</c> (see <see cref="KoshiMarker"/>),
+/// which keeps subsequent <c>koshi-mcp init</c> runs idempotent without
+/// depending on file hashes.
 /// </para>
 /// </summary>
 internal static class SteeringTemplateInstaller

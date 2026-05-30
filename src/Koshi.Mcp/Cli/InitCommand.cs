@@ -293,6 +293,21 @@ internal static class InitCommand
             stdout.WriteLine("  skipping steering templates (--skip-templates)");
         }
 
+        // ── 3e. Per-machine git template (#78 Gap C) ────────────────────────
+        // Opt-in (must pass --register-git-template) because this mutates
+        // global git config and a per-machine state, not project state.
+        // Drops the 4 steering rule files into every freshly-cloned repo via
+        // a post-checkout hook. See GitTemplateInstaller for limits.
+        if (opts.RegisterGitTemplate)
+        {
+            stdout.WriteLine();
+            stdout.WriteLine("==> git template");
+            var effectiveHome = homeDir
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var gtr = GitTemplateInstaller.Install(effectiveHome, opts.ForceGitTemplate, gitRunner);
+            anyError |= EmitGitTemplate(stdout, stderr, gtr);
+        }
+
         // ── 4. Vault clone / pull + team registration ──────────────────────
         if (teamYml is not null)
         {
@@ -491,6 +506,42 @@ internal static class InitCommand
         }
     }
 
+    private static bool EmitGitTemplate(TextWriter stdout, TextWriter stderr, GitTemplateResult r)
+    {
+        bool err;
+        switch (r.Outcome)
+        {
+            case GitTemplateOutcome.Installed:
+                stdout.WriteLine($"  git template: installed → {r.TemplateDir}");
+                stdout.WriteLine($"                 init.templatedir set; future `git clone` will auto-drop {r.WrittenFiles.Count - 1} steering files.");
+                err = false; break;
+            case GitTemplateOutcome.Updated:
+                stdout.WriteLine($"  git template: refreshed → {r.TemplateDir}");
+                stdout.WriteLine("                 init.templatedir already pointed at us; bodies updated.");
+                err = false; break;
+            case GitTemplateOutcome.AlreadyConfigured:
+                stdout.WriteLine($"  git template: already up to date @ {r.TemplateDir}");
+                err = false; break;
+            case GitTemplateOutcome.TemplatedirConflict:
+                stderr.WriteLine($"  git template: init.templatedir is already set to '{r.ConflictingTemplatedir}'");
+                stderr.WriteLine($"                refusing to overwrite. Pass --force-git-template to replace it,");
+                stderr.WriteLine($"                or `git config --global --unset init.templatedir` first.");
+                err = true; break;
+            case GitTemplateOutcome.GitMissing:
+                stderr.WriteLine($"  git template: {r.ErrorMessage}");
+                err = true; break;
+            case GitTemplateOutcome.Error:
+            default:
+                stderr.WriteLine($"  git template failed: {r.ErrorMessage}");
+                err = true; break;
+        }
+        if (!string.IsNullOrEmpty(r.Warning))
+        {
+            stderr.WriteLine($"  warning: {r.Warning}");
+        }
+        return err;
+    }
+
     private static bool EmitGit(TextWriter stdout, TextWriter stderr, GitSyncResult sync)
     {
         switch (sync.Outcome)
@@ -583,6 +634,8 @@ internal static class InitCommand
         bool ForcePersonas,
         bool ForceTemplates,
         bool AcceptTeamConfig,
+        bool RegisterGitTemplate,
+        bool ForceGitTemplate,
         string? ProjectRoot);
 
     internal static bool TryParseFlags(string[] args, out Options opts, out string? error)
@@ -591,6 +644,7 @@ internal static class InitCommand
         bool skipPersonas = false, skipTeam = false, skipRegister = false;
         bool skipTemplates = false, allTemplates = false;
         bool forcePersonas = false, forceTemplates = false, acceptTeamConfig = false;
+        bool registerGitTemplate = false, forceGitTemplate = false;
         string? projectRoot = null;
         List<string>? clients = null;
 
@@ -623,6 +677,10 @@ internal static class InitCommand
                     forceTemplates = true; break;
                 case "--accept-team-config":
                     acceptTeamConfig = true; break;
+                case "--register-git-template":
+                    registerGitTemplate = true; break;
+                case "--force-git-template":
+                    forceGitTemplate = true; registerGitTemplate = true; break;
 
                 case "--client":
                     if (i + 1 >= args.Length)
@@ -667,6 +725,8 @@ internal static class InitCommand
             ForcePersonas: forcePersonas,
             ForceTemplates: forceTemplates,
             AcceptTeamConfig: acceptTeamConfig,
+            RegisterGitTemplate: registerGitTemplate,
+            ForceGitTemplate: forceGitTemplate,
             ProjectRoot: projectRoot);
         error = null;
         return true;
@@ -698,7 +758,10 @@ internal static class InitCommand
         w.WriteLine("     Pass --all-templates to install every rule file regardless of detection.");
         w.WriteLine("  6. If .koshi-team.yml is present: git-clones (or fast-forward-pulls)");
         w.WriteLine("     the declared vault, then registers the declared team.");
-        w.WriteLine("  7. Prints next-steps + verification commands.");
+        w.WriteLine("  7. (Opt-in) With --register-git-template: writes ~/.git-template-koshi/");
+        w.WriteLine("     and points `git config --global init.templatedir` at it so every");
+        w.WriteLine("     freshly-cloned repo auto-receives the same steering files.");
+        w.WriteLine("  8. Prints next-steps + verification commands.");
         w.WriteLine();
         w.WriteLine("FLAGS");
         w.WriteLine("  --client <name>          claude | copilot | all. Repeatable. Defaults to auto-detect.");
@@ -712,6 +775,12 @@ internal static class InitCommand
         w.WriteLine("  --all-templates          Install every steering file regardless of which clients are detected.");
         w.WriteLine("  --force-personas         Overwrite existing persona files without prompting.");
         w.WriteLine("  --force-templates        Overwrite existing steering files instead of appending.");
+        w.WriteLine("  --register-git-template  Opt-in: install ~/.git-template-koshi and set init.templatedir");
+        w.WriteLine("                           so every `git clone` auto-drops the steering files. Limits:");
+        w.WriteLine("                           does not fire for `git init`, bare clones, or --no-checkout;");
+        w.WriteLine("                           a global `core.hooksPath` bypasses per-repo hooks.");
+        w.WriteLine("  --force-git-template     Overwrite an existing init.templatedir setting (implies");
+        w.WriteLine("                           --register-git-template).");
         w.WriteLine("  --accept-team-config     Trust .koshi-team.yml even if vault.path is absolute or");
         w.WriteLine("                           escapes the project root (off by default for safety).");
         w.WriteLine("  -h, --help               Show this help.");
