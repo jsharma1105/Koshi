@@ -5,6 +5,162 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-30
+
+This is a substantial minor release covering 33 commits across 27 PRs since
+v0.8.1. Headline themes: **one-command install** for every supported MCP
+client, an **interactive `koshi-mcp init` wizard**, **per-ecosystem steering
+templates** for .NET / Python / TypeScript / Java / Go / Rust, **structured
+JSON output** across all 24 tools, and an **`IndexWatcher`** that keeps the
+index fresh in steady state. Quality-side: a four-model deep code review
+shipped 48 fixes (#110), every production CodeQL alert was resolved (#109),
+and the README split into a 194-line landing page + 7 focused guides under
+`docs/` (#111). 868/868 tests green.
+
+### Added
+
+- **One-command shell installers (#74 Option A, PR #107)** — `curl -fsSL
+  https://raw.githubusercontent.com/jsharma1105/Koshi/main/scripts/install.sh | sh`
+  (Linux/macOS) or `irm .../install.ps1 | iex` (Windows PowerShell)
+  downloads a SHA-256-verified native AOT `koshi-mcp` binary for the
+  current platform, registers Koshi with every detected MCP client
+  (Claude Code, Copilot CLI, Cursor, Windsurf, Microsoft Agency),
+  installs the 5 sub-agent personas, and optionally indexes the current
+  directory. No `.NET` install required.
+- **`koshi-mcp init` interactive wizard (#68, #78 Gap A, PR #101)** —
+  detects installed MCP clients → checkbox list, merges
+  `mcpServers.koshi` into each selected client's config (with the
+  correct per-client filename), installs personas, offers to index
+  `$PWD` with live streaming progress, registers a team via the new
+  `.koshi-team.yml` convention, and runs `koshi-mcp doctor`. Flags:
+  `--non-interactive`, `--client <name>`, `--skip-index`,
+  `--skip-personas`, `--skip-team`.
+- **`koshi-mcp init --register-git-template` (#78 Gap C, PR #105)** —
+  writes a `.koshi/team-template.yml` so teammates pulling the repo
+  inherit the team config when they run `koshi-mcp init`.
+- **Per-ecosystem steering templates (#77 Layer 3, PR #103 + Layer 4,
+  PR #104)** — Koshi auto-installs Claude/Copilot steering snippets
+  tailored for .NET, Python, TypeScript, Java, Go, Rust, plus a generic
+  fallback. Each template teaches the agent how to use Koshi for that
+  stack (e.g. `.NET` projects: `koshi_search` your NuGet sources before
+  proposing new dependencies). The `koshi-orchestrator` persona is
+  expanded to all 24 tools.
+- **`koshi-mcp` MCP prompts for cross-client steering (#77 Layer 2,
+  PR #95)** — registers `koshi/capture-turn-guide`,
+  `koshi/recall-before-answer`, `koshi/context-pack-discipline`, and
+  `koshi/score-every-turn` via `[McpServerPrompt(...)]`. Surfaces as
+  slash menu items in Claude Desktop, command-palette entries in
+  Cursor and Windsurf, and `@-mentions` in Copilot CLI.
+- **`IndexWatcher` for steady-state index freshness (#78 Gap D,
+  PR #106)** — files modified after `koshi_index_directory` are
+  re-tokenized incrementally (no full re-index) via a debounced
+  `FileSystemWatcher`. Honors the same skip rules (hidden dirs, build
+  output, secret patterns, sensitive extensions, oversize files,
+  symlinks) as the initial index call.
+- **`koshi_index_directory` streams per-file progress (#69, PR #97)** —
+  emits progress on `stderr` *and* via MCP `notifications/progress`
+  with `total`, `progressToken`, and the current file path, so the
+  wizard's "indexing your project…" prompt is never a black box.
+- **Structured JSON output for every tool (#66 Phases 1/2a/2b,
+  PRs #98 / #99 / #100)** — set `KOSHI_OUTPUT_FORMAT=json` (env) or
+  pass `format=json` per-call. Tools return a typed envelope
+  `{tool, success, result, metadata}` instead of formatted prose;
+  enables Python and .NET clients to consume Koshi without regex-
+  parsing strings. Default is still `text` for backwards compatibility.
+- **Offline tool introspection (#67, PR #94)** — `koshi-mcp --list-tools`
+  and `koshi-mcp --describe <tool>` print the full tool surface
+  without an MCP handshake. The init wizard uses this to show users
+  "you got these 24 tools" before any client restart.
+- **`koshi-mcp doctor` live-pings each client (#71, PR #96)** —
+  instead of just verifying that the config file mentions Koshi, it
+  now spawns each detected client's `koshi` registration, runs the
+  MCP `initialize` handshake, and reports actual reachability.
+- **`koshi-mcp config` subcommand (#78 Gap B, PR #89)** — list /
+  set / unset / get env vars without manually editing client config
+  files. Knows about all 11 `KOSHI_*` env vars.
+- **`koshi-agents install --client X`** prints a Next Steps banner
+  (#72, PR #93) telling the user what to restart and what to try
+  first. Supports `--quiet` to silence and `--show-next-steps` to
+  print the banner without re-running install.
+- **`koshi_health` reports snapshot-loaded status (#70, PR #91)** —
+  returning users can confirm the BM25 index loaded from
+  `.koshi/index.json` instead of starting empty.
+- **Configurable history reserve in `koshi_budget_plan` (#73,
+  PR #92)** — `KOSHI_BUDGET_HISTORY_RESERVE_PCT` env (or per-call
+  override) replaces the hard-coded 25% reserve, with auto-detection
+  when both `history_token_count` and `total_budget` are known.
+
+### Fixed
+
+- **Multi-model deep code review (PR #110)** — Claude Haiku (Core),
+  Sonnet (Tools), Opus (Cli + Internal), and GPT-Codex (Agents + tests)
+  reviewed every C# file in parallel. 54 findings total; 6 false-
+  positives dismissed; **48 actionable fixes shipped** across 5 phases:
+  HIGH-severity security (path traversal hardening, narrowed catches),
+  contract drift (DTO ↔ JSON envelope), new `AtomicFileWriter` helper
+  (atomic-rename on Windows + POSIX), concurrency hardening
+  (`SemaphoreSlim` ownership audit), CLI polish (exit codes,
+  `--help` text, stderr formatting), and 10 new tests. Three follow-up
+  CodeQL alerts in the new code were fixed in the same PR.
+- **22 production CodeQL alerts (PR #109)** — replaced ad-hoc
+  `Path.Combine` with `Path.Join` everywhere user-controlled input
+  could flow into a path; narrowed `catch (Exception)` blocks to
+  specific types (`IOException`, `UnauthorizedAccessException`,
+  `JsonException`). Zero open CodeQL alerts on `main`.
+- **`koshi_compile_context` parses `koshi_recall` output as one
+  section per entry (#60, PR #87)** — previously the parser treated
+  the entire recall output as a single section, breaking section
+  boundaries and skewing token counts.
+- **`koshi-agents install --client X` now registers the koshi MCP
+  server (#64, PR #82)** — the subcommand previously installed
+  personas without writing the server registration, leaving Cursor/
+  Windsurf users with personas that pointed at nothing.
+- **Team registry + scores persist across restarts (#59, PR #84)** —
+  `TeamRegistry` now flushes to `.koshi/teams.json` on every mutation
+  and reloads on startup.
+- **`koshi_team_dashboard` populates all four metrics (#61, PR #86)** —
+  Tokens Used, Avg Latency, Cache Hit Rate, and Budget Utilization
+  previously showed `-` for every team because the score-to-metric
+  reducer was never wired up.
+- **`koshi-mcp` auto-loads `.koshi/index.json` snapshot on startup
+  (#62, PR #85)** — eliminates the "first search is always slow"
+  problem; existing snapshots are detected and mapped into memory
+  before the MCP handshake completes.
+- **Python wrapper exposes 4 previously-missing MCP tools (#76,
+  PR #83)** — `koshi_capture_turn`, `koshi_memory_export_to_vault`,
+  `koshi_memory_import_from_vault`, `koshi_memory_sync_vault` are
+  now first-class `Client` methods. Also adds `Client.call_tool(name,
+  **kwargs)` as an escape hatch for any tool the wrapper doesn't
+  surface explicitly.
+
+### Changed
+
+- **README readability audit complete (#75 Waves 1 / 2 / 3,
+  PRs #90 / #108 / #111)** — root README rebuilt to ≤120 lines
+  (outcomes-only), MCP README split from 643 → 194 lines plus 7
+  focused guides under `docs/` (`client-setup`, `configuration`,
+  `tools`, `walkthroughs`, `troubleshooting`, `development`,
+  `comparison`). All four READMEs (root, MCP, Agents, Python) gained
+  `Next steps` and `Known issues` sections. NuGet- and PyPI-packed
+  READMEs use absolute GitHub URLs so cross-doc links survive on
+  registry pages.
+- **All 24 tool descriptions rewritten to lead with WHEN+WHAT
+  (#77 Layer 1, PR #88)** — every `[McpServerTool]` description now
+  starts with the trigger ("When the user asks…") and the action
+  ("…use this tool to…"), making cross-client tool-discovery
+  consistent regardless of which client's heuristic picks the tool.
+
+### Dependencies
+
+- Bumped `Microsoft.NET.Test.Sdk` from 18.5.1 to 18.6.0 (PR #102).
+
+### Stats
+
+- **33 commits, 27 PRs** since v0.8.1.
+- **868 / 868 tests green** across `dotnet test` on
+  `ubuntu-latest`, `macos-latest`, `windows-latest`.
+- **0 open CodeQL alerts** on production `src/` code.
+
 ## [0.8.1] - 2026-05-26
 
 ### Fixed (Koshi.Agents personas — closes the Copilot CLI tool-search-gating bug)
