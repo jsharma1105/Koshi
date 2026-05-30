@@ -99,6 +99,17 @@ public sealed class DiagnosticTools
             diskNoun: "Snapshot on disk");
         if (indexStatus.snapshotLoadWarning is not null)
             sb.AppendLine($"    Warning:     {indexStatus.snapshotLoadWarning}");
+        var watcher = RetrievalTools.GetIndexWatcherStatus();
+        sb.AppendLine($"    Watcher:     mode={watcher.mode}, {watcher.status}");
+        if (watcher.mode != "off")
+        {
+            sb.AppendLine($"      pending:    {watcher.pendingEvents}");
+            sb.AppendLine($"      rebuilds:   {watcher.totalRebuilds}");
+            if (watcher.lastRebuildAt is not null)
+                sb.AppendLine($"      last reb.:  {watcher.lastRebuildAt:o}");
+            if (watcher.degraded)
+                sb.AppendLine($"      DEGRADED:   {watcher.degradedReason ?? "(unspecified)"}");
+        }
         var namedCorpora = RetrievalTools.GetNamedCorporaStatus();
         if (namedCorpora.Count > 0)
         {
@@ -206,7 +217,8 @@ public sealed class DiagnosticTools
             Path: indexStatus.path,
             Persistence: retrievalPersistence,
             SnapshotLoadWarning: indexStatus.snapshotLoadWarning,
-            NamedCorpora: namedCorporaList);
+            NamedCorpora: namedCorporaList,
+            IndexWatcher: BuildIndexWatcherData());
 
         var memPersistence = new PersistenceData(
             Enabled: memStatus.PersistenceEnabled,
@@ -276,6 +288,23 @@ public sealed class DiagnosticTools
 
         return OutputFormatting.Ok("koshi_health", payload,
             KoshiOutputJsonContext.Default.JsonEnvelopeHealthResultData);
+    }
+
+    private static IndexWatcherData BuildIndexWatcherData()
+    {
+        var w = RetrievalTools.GetIndexWatcherStatus();
+        return new IndexWatcherData(
+            Mode: w.mode,
+            Status: w.status,
+            Root: w.root,
+            Degraded: w.degraded,
+            DegradedReason: w.degradedReason,
+            PendingEvents: w.pendingEvents,
+            TotalRebuilds: w.totalRebuilds,
+            LastEventAt: w.lastEventAt,
+            LastRebuildAt: w.lastRebuildAt,
+            DebounceMs: w.debounceMs,
+            PollIntervalSeconds: w.pollIntervalSeconds);
     }
 
     /// <summary>

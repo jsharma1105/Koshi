@@ -46,6 +46,72 @@ internal static class SafeFileEnumerator
         ".pkcs12", ".jks", ".keystore",
     ];
 
+    /// <summary>
+    /// Path-based indexability check. Returns true when the path *would* be
+    /// considered for indexing based on its name/extension/parent segments
+    /// alone — without touching the filesystem.
+    /// </summary>
+    /// <remarks>
+    /// Used by <see cref="IndexWatcher"/> to decide whether a watcher event
+    /// is for a path that might have been (or might become) part of the index.
+    /// Importantly this works for paths whose file no longer exists (deletes /
+    /// rename-olds), so the watcher can correctly remove stale chunks for a
+    /// file that was indexed at session start but has since been deleted.
+    /// File-state checks (size / readability) belong to
+    /// <see cref="IsCurrentlyIndexable"/>.
+    /// </remarks>
+    public static bool IsPathLikelyIndexed(string fullPath, string? globPattern)
+    {
+        if (string.IsNullOrEmpty(fullPath)) return false;
+
+        var normalized = fullPath.Replace('\\', '/');
+        var fileName = Path.GetFileName(fullPath);
+        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+
+        if (IsExcludedDirectory(normalized)) return false;
+        if (IsExcludedFile(fileName, ext)) return false;
+
+        if (!string.IsNullOrEmpty(globPattern))
+        {
+            if (!MatchesSimpleGlob(fileName, globPattern)) return false;
+        }
+        else if (!IsSupportedExtension(ext))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Full file-state indexability check. Combines
+    /// <see cref="IsPathLikelyIndexed"/> with a current-state stat: the file
+    /// exists, is non-empty, and within the size budget. Returns false when
+    /// the file has been deleted or the stat call fails — callers MUST treat
+    /// a false here as "do not re-read", not as "do not touch the index"
+    /// (a previously-indexed deleted file still needs its chunks removed,
+    /// which the path-based predicate above is for).
+    /// </summary>
+    public static bool IsCurrentlyIndexable(string fullPath, string? globPattern, long maxBytes)
+    {
+        if (!IsPathLikelyIndexed(fullPath, globPattern)) return false;
+
+        try
+        {
+            var info = new FileInfo(fullPath);
+            if (!info.Exists) return false;
+            if (info.Length == 0) return false;
+            if (info.Length > maxBytes) return false;
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+                or NotSupportedException or PathTooLongException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
     public static IEnumerable<string> EnumerateIndexableFiles(
         string rootPath,
         string? globPattern,
@@ -97,6 +163,21 @@ internal static class SafeFileEnumerator
             yielded++;
             yield return file;
         }
+    }
+
+    /// <summary>
+    /// Path-based check for whether a directory itself is in an excluded
+    /// segment (e.g., <c>.git/</c>, <c>node_modules/</c>). Used by the
+    /// <c>IndexWatcher</c> to decide whether to drop directory events before
+    /// they hit the drain. Operates on a normalized full path; appends a
+    /// trailing <c>/</c> so the segment-contains check is reliable for the
+    /// directory leaf itself.
+    /// </summary>
+    public static bool IsExcludedDirectoryPath(string fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath)) return true;
+        var normalized = fullPath.Replace('\\', '/').TrimEnd('/') + "/";
+        return IsExcludedDirectory(normalized);
     }
 
     private static bool IsExcludedDirectory(string normalizedPath)
