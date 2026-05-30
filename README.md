@@ -56,11 +56,11 @@ Full mechanics: [`docs/auto-capture.md`](docs/auto-capture.md).
 
 ## Works with
 
-[![Copilot CLI](https://img.shields.io/badge/GitHub-Copilot_CLI-24292e?logo=github)](src/Koshi.Mcp/README.md#client-setup)
-[![Claude](https://img.shields.io/badge/Claude-Code_&_Desktop-d97757?logo=anthropic)](src/Koshi.Mcp/README.md#client-setup)
-[![Cursor](https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white)](src/Koshi.Mcp/README.md#client-setup)
-[![Windsurf](https://img.shields.io/badge/Windsurf-09b6a2)](src/Koshi.Mcp/README.md#client-setup)
-[![Agency](https://img.shields.io/badge/Microsoft-Agency_CLI-0078D4?logo=microsoft)](src/Koshi.Mcp/README.md#client-setup)
+[![Copilot CLI](https://img.shields.io/badge/GitHub-Copilot_CLI-24292e?logo=github)](docs/client-setup.md)
+[![Claude](https://img.shields.io/badge/Claude-Code_&_Desktop-d97757?logo=anthropic)](docs/client-setup.md)
+[![Cursor](https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white)](docs/client-setup.md)
+[![Windsurf](https://img.shields.io/badge/Windsurf-09b6a2)](docs/client-setup.md)
+[![Agency](https://img.shields.io/badge/Microsoft-Agency_CLI-0078D4?logo=microsoft)](docs/client-setup.md)
 [![PyPI](https://img.shields.io/badge/Python-pip_install_koshi-3776AB?logo=python&logoColor=white)](python/README.md)
 
 One server, one on-disk format. Memories captured in one client are
@@ -71,7 +71,7 @@ visible to every other client pointed at the same project or vault.
 | Action | Automatic after install | Notes |
 |---|---|---|
 | MCP server binary on PATH | yes | shell installer; SHA-256 verified |
-| MCP config entry written | Claude Code / Copilot CLI | Cursor / Windsurf / Agency: see [client setup](src/Koshi.Mcp/README.md#client-setup) |
+| MCP config entry written | Claude Code / Copilot CLI | Cursor / Windsurf / Agency: see [client setup](docs/client-setup.md) |
 | Sub-agent personas installed | Claude Code / Copilot CLI | same scope as config above |
 | Steering snippets dropped in project | yes, when detected | `AGENTS.md` always; `.cursorrules` / `.windsurfrules` / `.github/copilot-instructions.md` when their marker is present |
 | Decision-capture prompt installed | yes | agents are instructed to call `koshi_capture_turn` after non-trivial decisions, not every reply |
@@ -111,3 +111,4 @@ and capture new decisions as it goes.
 ---
 
 [Full docs](docs/) · [Contributing](CONTRIBUTING.md) · [License (MIT)](LICENSE)
+

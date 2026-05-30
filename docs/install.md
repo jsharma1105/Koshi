@@ -53,7 +53,7 @@ two MCP clients whose config files `koshi-mcp init` writes directly. For
 Cursor / Windsurf / Agency, run the installer without `--client` and the
 wizard drops `.cursorrules`, `.windsurfrules`, and `AGENTS.md` into the
 project automatically whenever it detects the matching project markers —
-see [Client Setup](../src/Koshi.Mcp/README.md#client-setup) for one-time
+see [Client Setup](client-setup.md) for one-time
 config-file entries those clients still need.
 
 The `init` wizard subcommand was added after `v0.8.1`. The installer probes

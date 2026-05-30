@@ -53,7 +53,7 @@ captures are visible to all of them.
 
 `koshi-mcp init` writes the correct JSON into each detected client's
 config. Full per-client snippets live in
-[`src/Koshi.Mcp/README.md#client-setup`](../src/Koshi.Mcp/README.md#client-setup)
+[`docs/client-setup.md`](../docs/client-setup.md)
 for manual setup.
 
 ## 3. Distribute the memories with Git, not Slack

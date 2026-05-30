@@ -50,7 +50,7 @@ The first `Client()` call:
 | **Team / Quality** | `register_team`, `score_turn`, `team_dashboard`, `analyze_feedback`, `list_teams` |
 | **Diagnostics** | `version`, `health` |
 
-Every method returns the formatted text response from the MCP server. The full Koshi tool reference lives in the [main README](https://github.com/jsharma1105/Koshi#mcp-tools).
+Every method returns the formatted text response from the MCP server. The full Koshi tool reference lives in [`docs/tools.md`](https://github.com/jsharma1105/Koshi/blob/main/docs/tools.md).
 
 > 💡 **`capture_turn`** is the v0.8.0 auto-capture entry point — pass a
 > 1–3 paragraph summary plus optional `linked_pr` / `linked_commits` and
@@ -66,7 +66,7 @@ Every method returns the formatted text response from the MCP server. The full K
 
 The Python wrapper just spawns `koshi-mcp` as a subprocess, so **every
 server-side env var works the same** — see the
-[full configuration reference](https://github.com/jsharma1105/Koshi/blob/main/src/Koshi.Mcp/README.md#configuration)
+[full configuration reference](https://github.com/jsharma1105/Koshi/blob/main/docs/configuration.md)
 for all 11 vars (`KOSHI_PROJECT_ROOT`, `KOSHI_MEMORY_VAULT`,
 `KOSHI_VAULT_FLAVOR`, `KOSHI_VAULT_WATCH`, `KOSHI_TOKENIZER_MODEL`,
 `KOSHI_CHUNK_*`, `KOSHI_BM25_STEMMING`, and the four below).
@@ -122,6 +122,30 @@ Koshi's engine is .NET. That's a deliberate choice — the runtime gets us best-
 - **Release binaries**: <https://github.com/jsharma1105/Koshi/releases>
 - **NuGet (.NET tool)**: <https://www.nuget.org/packages/Koshi.Mcp>
 - **Changelog**: <https://github.com/jsharma1105/Koshi/blob/main/CHANGELOG.md>
+
+## Next steps
+
+After installing:
+
+```python
+from koshi import Client
+
+with Client() as koshi:
+    print(koshi.version())         # confirms the binary is wired up
+    print(koshi.health())          # shows env-var resolution + corpus size
+```
+
+Then index your project and start asking the agent project questions; see
+the [walkthroughs](https://github.com/jsharma1105/Koshi/blob/main/docs/walkthroughs.md)
+for end-to-end recipes.
+
+## Known issues
+
+Every exception is documented in the
+[Python wrapper troubleshooting section](https://github.com/jsharma1105/Koshi/blob/main/docs/troubleshooting.md#python-wrapper-errors)
+with what triggers it and how to fix. Hitting something not listed there?
+Search [open bugs](https://github.com/jsharma1105/Koshi/issues?q=is%3Aissue+is%3Aopen+label%3Abug)
+before assuming it's you.
 
 ## License
 
