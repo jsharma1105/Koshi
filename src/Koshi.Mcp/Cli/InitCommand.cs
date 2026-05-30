@@ -611,6 +611,15 @@ internal static class InitCommand
                 return backend.LastSaveError;
             return null;
         }
+        catch (TeamsPersistenceException ex)
+        {
+            // TeamsBackend.Save wraps persistence failures (IO, permissions,
+            // JSON, etc.) in TeamsPersistenceException. Without an explicit
+            // arm in the catch filter the wizard would crash with a raw stack
+            // trace instead of returning a clean error message to the user.
+            // (Opus multi-model review #1.)
+            return ex.Message;
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or InvalidOperationException or JsonException)
         {

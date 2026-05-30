@@ -254,99 +254,101 @@ public sealed class MemoryTools
 
         topK = Math.Clamp(topK < 1 ? 5 : topK, 1, MaxRecallTopK);
 
-        return _store.WithFreshState(memories =>
+        // Snapshot the memories list under the store lock, then release it.
+        // BM25 scoring is CPU-bound and serialising every concurrent reader on
+        // the global MemoryStore lock causes pile-ups under load. The snapshot
+        // is a shallow copy of immutable MemoryRecord references so doing the
+        // scoring outside the lock is safe. (Sonnet multi-model review S3.)
+        List<MemoryRecord> candidates = _store.WithFreshState(memories => new List<MemoryRecord>(memories));
+
+        if (candidates.Count == 0)
+            return RecallEmpty(fmt, query, type,
+                "No memories stored yet. Use koshi_remember to store facts.");
+
+        if (!string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)
+            && Enum.TryParse<MemoryType>(type, true, out var mt))
         {
-            List<MemoryRecord> candidates = [.. memories];
+            candidates = candidates.Where(m => m.Type == mt).ToList();
+        }
 
-            if (candidates.Count == 0)
-                return RecallEmpty(fmt, query, type,
-                    "No memories stored yet. Use koshi_remember to store facts.");
+        var hasScopeFilter = !string.IsNullOrWhiteSpace(userId)
+                          || !string.IsNullOrWhiteSpace(workspaceId)
+                          || !string.IsNullOrWhiteSpace(threadId);
+        if (hasScopeFilter)
+        {
+            candidates = candidates.Where(m => MatchesScope(m.Scope, userId, workspaceId, threadId)).ToList();
+        }
 
-            if (!string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)
-                && Enum.TryParse<MemoryType>(type, true, out var mt))
+        if (candidates.Count == 0)
+            return hasScopeFilter
+                ? RecallEmpty(fmt, query, type,
+                    $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}').")
+                : RecallEmpty(fmt, query, type,
+                    $"No memories of type '{type}'.");
+
+        var bm25Scores = ComputeBm25Scores(query, candidates);
+        double maxBm25 = bm25Scores.Count > 0 ? bm25Scores.Values.Max() : 0.0;
+        var bm25Denominator = maxBm25 > 0 ? maxBm25 : 1.0;
+
+        var now = DateTimeOffset.UtcNow;
+        var scored = candidates
+            .Select(m =>
             {
-                candidates = candidates.Where(m => m.Type == mt).ToList();
-            }
+                var rawBm25 = bm25Scores.GetValueOrDefault(m.Id, 0.0);
+                var normalizedBm25 = (float)(rawBm25 / bm25Denominator);
+                var recencyBonus = (float)Math.Exp(-(now - m.CreatedAt).TotalHours / 24.0);
+                // Per #24 acceptance criteria: 0.6·BM25 + 0.3·recency + 0.1·confidence.
+                var combined = 0.6f * normalizedBm25 + 0.3f * recencyBonus + 0.1f * m.Confidence;
+                return (Memory: m, Score: combined, Bm25: normalizedBm25);
+            })
+            // Require some textual relevance — pure recency/confidence shouldn't surface unrelated memories.
+            .Where(x => x.Bm25 > 0)
+            .OrderByDescending(x => x.Score)
+            .Take(topK)
+            .ToList();
 
-            var hasScopeFilter = !string.IsNullOrWhiteSpace(userId)
-                              || !string.IsNullOrWhiteSpace(workspaceId)
-                              || !string.IsNullOrWhiteSpace(threadId);
-            if (hasScopeFilter)
-            {
-                candidates = candidates.Where(m => MatchesScope(m.Scope, userId, workspaceId, threadId)).ToList();
-            }
+        if (scored.Count == 0)
+            return RecallEmpty(fmt, query, type,
+                $"No memories found matching '{query}'.");
 
-            if (candidates.Count == 0)
-                return hasScopeFilter
-                    ? RecallEmpty(fmt, query, type,
-                        $"No memories match the scope filter (user='{userId}', workspace='{workspaceId}', thread='{threadId}').")
-                    : RecallEmpty(fmt, query, type,
-                        $"No memories of type '{type}'.");
-
-            var bm25Scores = ComputeBm25Scores(query, candidates);
-            double maxBm25 = bm25Scores.Count > 0 ? bm25Scores.Values.Max() : 0.0;
-            var bm25Denominator = maxBm25 > 0 ? maxBm25 : 1.0;
-
-            var now = DateTimeOffset.UtcNow;
-            var scored = candidates
-                .Select(m =>
-                {
-                    var rawBm25 = bm25Scores.GetValueOrDefault(m.Id, 0.0);
-                    var normalizedBm25 = (float)(rawBm25 / bm25Denominator);
-                    var recencyBonus = (float)Math.Exp(-(now - m.CreatedAt).TotalHours / 24.0);
-                    // Per #24 acceptance criteria: 0.6·BM25 + 0.3·recency + 0.1·confidence.
-                    var combined = 0.6f * normalizedBm25 + 0.3f * recencyBonus + 0.1f * m.Confidence;
-                    return (Memory: m, Score: combined, Bm25: normalizedBm25);
-                })
-                // Require some textual relevance — pure recency/confidence shouldn't surface unrelated memories.
-                .Where(x => x.Bm25 > 0)
-                .OrderByDescending(x => x.Score)
-                .Take(topK)
-                .ToList();
-
-            if (scored.Count == 0)
-                return RecallEmpty(fmt, query, type,
-                    $"No memories found matching '{query}'.");
-
-            if (fmt == OutputFormat.Json)
-            {
-                var jsonMemories = new List<RecalledMemoryData>(scored.Count);
-                foreach (var (mem, score, _) in scored)
-                {
-                    jsonMemories.Add(new RecalledMemoryData(
-                        Id: mem.Id,
-                        Type: mem.Type.ToString(),
-                        Subject: mem.Subject,
-                        Content: mem.Content,
-                        Score: score,
-                        Confidence: mem.Confidence,
-                        Scope: new ScopeData(mem.Scope.UserId, mem.Scope.WorkspaceId, mem.Scope.ThreadId),
-                        Source: mem.Source,
-                        CreatedAt: mem.CreatedAt));
-                }
-                var payload = new RecallResultData(query, type, scored.Count, jsonMemories);
-                return OutputFormatting.Ok("koshi_recall", payload,
-                    KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
-            }
-
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"═══ Recalled {scored.Count} memories for: \"{query}\" ═══\n");
-
+        if (fmt == OutputFormat.Json)
+        {
+            var jsonMemories = new List<RecalledMemoryData>(scored.Count);
             foreach (var (mem, score, _) in scored)
             {
-                var scopeLabel = mem.Scope.UserId == "*"
-                    ? $"workspace='{mem.Scope.WorkspaceId}'"
-                    : $"user='{mem.Scope.UserId}', workspace='{mem.Scope.WorkspaceId}'";
-                if (mem.Scope.ThreadId is not null) scopeLabel += $", thread='{mem.Scope.ThreadId}'";
-
-                sb.AppendLine($"  [{mem.Type}] {mem.Subject} (score: {score:F2}, confidence: {mem.Confidence:P0})");
-                sb.AppendLine($"    {mem.Content}");
-                sb.AppendLine($"    Scope: {scopeLabel} | Source: {mem.Source} | Stored: {mem.CreatedAt:g}");
-                sb.AppendLine();
+                jsonMemories.Add(new RecalledMemoryData(
+                    Id: mem.Id,
+                    Type: mem.Type.ToString(),
+                    Subject: mem.Subject,
+                    Content: mem.Content,
+                    Score: score,
+                    Confidence: mem.Confidence,
+                    Scope: new ScopeData(mem.Scope.UserId, mem.Scope.WorkspaceId, mem.Scope.ThreadId),
+                    Source: mem.Source,
+                    CreatedAt: mem.CreatedAt));
             }
+            var payload = new RecallResultData(query, type, scored.Count, jsonMemories);
+            return OutputFormatting.Ok("koshi_recall", payload,
+                KoshiOutputJsonContext.Default.JsonEnvelopeRecallResultData);
+        }
 
-            return sb.ToString();
-        });
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"═══ Recalled {scored.Count} memories for: \"{query}\" ═══\n");
+
+        foreach (var (mem, score, _) in scored)
+        {
+            var scopeLabel = mem.Scope.UserId == "*"
+                ? $"workspace='{mem.Scope.WorkspaceId}'"
+                : $"user='{mem.Scope.UserId}', workspace='{mem.Scope.WorkspaceId}'";
+            if (mem.Scope.ThreadId is not null) scopeLabel += $", thread='{mem.Scope.ThreadId}'";
+
+            sb.AppendLine($"  [{mem.Type}] {mem.Subject} (score: {score:F2}, confidence: {mem.Confidence:P0})");
+            sb.AppendLine($"    {mem.Content}");
+            sb.AppendLine($"    Scope: {scopeLabel} | Source: {mem.Source} | Stored: {mem.CreatedAt:g}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 
     private static string RecallEmpty(OutputFormat fmt, string query, string type, string textMessage)
@@ -552,8 +554,14 @@ public sealed class MemoryTools
         {
             return _store.WithFreshState(memories =>
             {
+                // Substring match: the koshi_forget tool description promises
+                // "case-insensitive substring match" (so "Postgres" matches
+                // "Postgres 16 for auth" or "I prefer Postgres"). Earlier
+                // revisions used Equals — that silently dropped every forget
+                // call that wasn't an exact whole-subject match. (Sonnet
+                // multi-model review #1; #57-style contract drift.)
                 var toRemove = memories
-                    .Where(m => m.Subject.Equals(subject, StringComparison.OrdinalIgnoreCase))
+                    .Where(m => m.Subject.Contains(subject, StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
                 foreach (var rec in toRemove) memories.Remove(rec);

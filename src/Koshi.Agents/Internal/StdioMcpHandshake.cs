@@ -36,6 +36,16 @@ internal sealed class StdioMcpHandshake : IMcpHandshake
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeoutMs);
 
+        // Start reading stdout BEFORE WaitForExit to avoid a pipe-buffer
+        // deadlock: if the child's --version output ever exceeds ~4KB
+        // (e.g. future "koshi-mcp 1.0 (commit X, build Y, deps {...})"), the
+        // pipe buffer fills, the child blocks on write, and WaitForExitAsync
+        // blocks forever. Reading concurrently keeps the pipe drained.
+        // (Codex multi-model review C3.)
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
+        // Also drain stderr to prevent the same deadlock on the stderr pipe.
+        var stderrTask = proc.StandardError.ReadToEndAsync(cts.Token);
+
         try
         {
             await proc.WaitForExitAsync(cts.Token);
@@ -47,7 +57,16 @@ internal sealed class StdioMcpHandshake : IMcpHandshake
         }
 
         if (proc.ExitCode != 0) return null;
-        var stdout = await proc.StandardOutput.ReadToEndAsync(cancellationToken);
+        string stdout;
+        try { stdout = await stdoutTask; }
+        catch (OperationCanceledException) { return null; }
+        // Best-effort drain — failure here doesn't affect the version probe.
+        // Narrow catch: only swallow the exceptions ReadToEndAsync can throw
+        // on a stream that has already closed or been cancelled. Anything
+        // else (OOM, ThreadAbort, etc.) should propagate.
+        try { await stderrTask; }
+        catch (Exception ex) when (
+            ex is OperationCanceledException or IOException or ObjectDisposedException) { _ = ex; }
         var trimmed = stdout.Trim();
         // Expected format: "koshi-mcp 0.8.1" (single line). Be tolerant of
         // future additions ("koshi-mcp 0.9.0 (commit abc)") and older builds.
@@ -119,7 +138,11 @@ internal sealed class StdioMcpProcess : IMcpProcess
     private readonly Dictionary<int, JsonElement> _responses = new();
     private readonly SemaphoreSlim _responseSignal = new(0);
     private readonly SemaphoreSlim _stdinLock = new(1, 1);
-    private readonly List<string> _stderr = new();
+    // Ring buffer for stderr — keeps the LAST StderrTailCap lines, not the
+    // first. The old head-keep semantics meant that when something failed
+    // repeatedly, the user got 50 boilerplate "starting" lines and the
+    // actual error was discarded. (Codex multi-model review C4.)
+    private readonly Queue<string> _stderr = new();
     private readonly object _stderrLock = new();
     private readonly CancellationTokenSource _readerCts = new();
     private readonly Task _stdoutReader;
@@ -141,6 +164,14 @@ internal sealed class StdioMcpProcess : IMcpProcess
         {
             lock (_stderrLock) return _stderr.ToArray();
         }
+    }
+
+    // Append to the ring buffer, dropping the oldest line when full so the
+    // most recent context survives. Caller MUST hold _stderrLock.
+    private void AppendStderrLocked(string line)
+    {
+        if (_stderr.Count >= StderrTailCap) _stderr.Dequeue();
+        _stderr.Enqueue(line);
     }
 
     public async Task<JsonElement?> RpcAsync(string method, object? @params, int timeoutMs, CancellationToken cancellationToken)
@@ -256,8 +287,7 @@ internal sealed class StdioMcpProcess : IMcpProcess
                 {
                     lock (_stderrLock)
                     {
-                        if (_stderr.Count < StderrTailCap)
-                            _stderr.Add($"[stdout/non-json] {Truncate(line, 200)}");
+                        AppendStderrLocked($"[stdout/non-json] {Truncate(line, 200)}");
                     }
                 }
             }
@@ -267,8 +297,7 @@ internal sealed class StdioMcpProcess : IMcpProcess
         {
             lock (_stderrLock)
             {
-                if (_stderr.Count < StderrTailCap)
-                    _stderr.Add($"[stdout/error] {Truncate(ex.Message, 200)}");
+                AppendStderrLocked($"[stdout/error] {Truncate(ex.Message, 200)}");
             }
         }
     }
@@ -283,8 +312,7 @@ internal sealed class StdioMcpProcess : IMcpProcess
             {
                 lock (_stderrLock)
                 {
-                    if (_stderr.Count < StderrTailCap)
-                        _stderr.Add(Truncate(line, 200));
+                    AppendStderrLocked(Truncate(line, 200));
                 }
             }
         }

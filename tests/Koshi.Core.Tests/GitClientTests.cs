@@ -26,6 +26,19 @@ public sealed class GitClientTests
         Assert.Throws<ArgumentException>(() => GitClient.ResolveRepoUrl(""));
     }
 
+    // Multi-model review O2: a URL beginning with `-` would be parsed by
+    // git as a flag (e.g. `--upload-pack=…`). ResolveRepoUrl must refuse it
+    // even though all other validation passes; the `--` separator in the
+    // clone call is a belt — this is the suspenders.
+    [Theory]
+    [InlineData("-not-a-url")]
+    [InlineData("--upload-pack=evil")]
+    [InlineData("  -starts-with-dash-after-trim")]
+    public void ResolveRepoUrl_rejects_urls_starting_with_dash(string raw)
+    {
+        Assert.Throws<ArgumentException>(() => GitClient.ResolveRepoUrl(raw));
+    }
+
     [Theory]
     [InlineData("https://github.com/owner/repo.git", "https://github.com/owner/repo", true)]
     [InlineData("https://github.com/owner/repo.git", "https://github.com/Owner/REPO/", true)]
@@ -45,9 +58,12 @@ public sealed class GitClientTests
         {
             var r = GitClient.EnsureClonedOrFastForward(fake, dir, "gh:owner/repo");
             Assert.Equal(GitSyncOutcome.Cloned, r.Outcome);
+            // Clone command now includes a `--` separator so URLs/paths can
+            // never be parsed as git flags. (Multi-model review O2.)
             Assert.Contains(fake.Calls, c => c.Args[0] == "clone"
-                && c.Args[1] == "https://github.com/owner/repo.git"
-                && c.Args[2] == dir);
+                && c.Args[1] == "--"
+                && c.Args[2] == "https://github.com/owner/repo.git"
+                && c.Args[3] == dir);
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
     }

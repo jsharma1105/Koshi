@@ -91,9 +91,7 @@ internal sealed class TeamsBackend
 
             var json = JsonSerializer.Serialize(envelope, KoshiJsonContext.Default.TeamsEnvelope);
 
-            var tempPath = Path + ".tmp";
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, Path, overwrite: true);
+            AtomicFileWriter.WriteAllText(Path, json);
             LastSaveError = null;
         }
         catch (Exception ex) when (
