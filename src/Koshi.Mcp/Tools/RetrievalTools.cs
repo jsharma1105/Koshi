@@ -275,12 +275,9 @@ public sealed class RetrievalTools
         // overlapping IndexDirectory calls cannot stomp each other's
         // intent. Env-watch / env-poll still wins on mode (more conservative
         // fallback for network mounts); see ResolveWatchMode.
-        IndexWatchMode? perCallWatch = watch switch
-        {
-            true => IndexWatchMode.Watch,
-            false => IndexWatchMode.Off,
-            _ => null,
-        };
+        IndexWatchMode? perCallWatch = null;
+        if (watch == true) perCallWatch = IndexWatchMode.Watch;
+        else if (watch == false) perCallWatch = IndexWatchMode.Off;
 
         return await IndexDirectoryCore(
             ToolName, fmt, path, pattern, maxFileSizeKb, maxFiles,
@@ -1486,7 +1483,7 @@ public sealed class RetrievalTools
 
             // The watcher may emit relative paths (normal case) or absolute
             // paths (root-sentinel case from error handler). Normalise.
-            string rel = relOrFull;
+            string rel;
             string fullPath;
             if (Path.IsPathRooted(relOrFull))
             {
@@ -1497,6 +1494,8 @@ public sealed class RetrievalTools
             else
             {
                 rel = relOrFull.Replace('\\', '/');
+                // rel is guaranteed relative because !Path.IsPathRooted(relOrFull),
+                // so Path.Combine cannot silently drop rootFull.
                 fullPath = Path.GetFullPath(Path.Combine(rootFull, rel));
             }
 

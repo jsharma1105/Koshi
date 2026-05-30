@@ -86,7 +86,7 @@ internal sealed class IndexWatcher : IDisposable
     private readonly FileSystemWatcher? _fsw;
     private readonly Task? _workerTask;
     private readonly Task? _pollTask;
-    private string? _attachFailure;
+    private readonly string? _attachFailure;
     private Dictionary<string, (long Size, long Mtime)>? _pollBaseline;
     private int _totalRebuilds;
     private bool _disposed;
@@ -148,7 +148,8 @@ internal sealed class IndexWatcher : IDisposable
                 Console.Error.WriteLine(
                     $"[koshi] Index watcher could not attach to '{RootPath}' " +
                     $"({_attachFailure}); index will not auto-refresh.");
-                try { _fsw?.Dispose(); } catch { /* best effort */ }
+                try { _fsw?.Dispose(); }
+                catch (Exception disposeEx) when (disposeEx is ObjectDisposedException or InvalidOperationException) { _ = disposeEx; }
                 _fsw = null;
                 IsAttached = false;
             }
@@ -381,9 +382,9 @@ internal sealed class IndexWatcher : IDisposable
                     if (!baseline.TryGetValue(path, out var prev) || prev.Size != state.Size || prev.Mtime != state.Mtime)
                         EnqueuePath(path);
                 }
-                foreach (var path in baseline.Keys)
+                foreach (var path in baseline.Keys.Where(p => !current.ContainsKey(p)))
                 {
-                    if (!current.ContainsKey(path)) EnqueuePath(path);
+                    EnqueuePath(path);
                 }
                 _pollBaseline = current;
             }
