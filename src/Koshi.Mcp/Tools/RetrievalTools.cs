@@ -1427,7 +1427,8 @@ public sealed class RetrievalTools
     {
         var w = _indexWatcher;
         _indexWatcher = null;
-        try { w?.Dispose(); } catch { /* best effort */ }
+        try { w?.Dispose(); }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or IOException) { _ = ex; }
     }
 
     /// <summary>
@@ -1494,9 +1495,10 @@ public sealed class RetrievalTools
             else
             {
                 rel = relOrFull.Replace('\\', '/');
-                // rel is guaranteed relative because !Path.IsPathRooted(relOrFull),
-                // so Path.Combine cannot silently drop rootFull.
-                fullPath = Path.GetFullPath(Path.Combine(rootFull, rel));
+                // Use Path.Join (not Combine) — Combine would silently drop rootFull
+                // if rel were rooted. !Path.IsPathRooted(relOrFull) is already true,
+                // but Path.Join is footgun-free regardless.
+                fullPath = Path.GetFullPath(Path.Join(rootFull, rel));
             }
 
             // Root sentinel: full reconciliation. Clear all chunks so deleted

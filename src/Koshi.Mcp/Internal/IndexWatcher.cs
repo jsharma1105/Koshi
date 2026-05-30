@@ -313,7 +313,7 @@ internal sealed class IndexWatcher : IDisposable
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             Console.Error.WriteLine($"[koshi] Index watcher worker crashed: {ex.GetType().Name}: {ex.Message}");
             SetDegraded($"worker crash: {ex.GetType().Name}");
@@ -345,7 +345,7 @@ internal sealed class IndexWatcher : IDisposable
             return batch.Count;
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             Console.Error.WriteLine($"[koshi] Index watcher drain failed: {ex.GetType().Name}: {ex.Message}");
             SetDegraded($"drain crash: {ex.GetType().Name}");
@@ -429,7 +429,8 @@ internal sealed class IndexWatcher : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        try { _cts.Cancel(); } catch { /* best effort */ }
+        try { _cts.Cancel(); }
+        catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { _ = ex; }
 
         if (_fsw is not null)
         {
@@ -443,11 +444,13 @@ internal sealed class IndexWatcher : IDisposable
                 _fsw.Error -= OnFswError;
                 _fsw.Dispose();
             }
-            catch { /* best effort */ }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or IOException) { _ = ex; }
         }
 
-        try { _signal.Dispose(); } catch { /* best effort */ }
-        try { _cts.Dispose(); } catch { /* best effort */ }
+        try { _signal.Dispose(); }
+        catch (Exception ex) when (ex is ObjectDisposedException) { _ = ex; }
+        try { _cts.Dispose(); }
+        catch (Exception ex) when (ex is ObjectDisposedException) { _ = ex; }
     }
 
     /// <summary>
