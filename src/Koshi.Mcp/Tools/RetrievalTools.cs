@@ -44,6 +44,14 @@ public sealed class RetrievalTools
     // the InternalsVisibleTo'd test reset hook does.
     private static IndexPersistence _persistence;
 
+    // IndexWatcher for steady-state index freshness (#78 Gap D). Started after
+    // ReplaceIndex or snapshot auto-load when KOSHI_INDEX_WATCH is set; torn
+    // down by ClearDefaultCorpusCore and ResetForTests. Generation check uses
+    // ReferenceEquals(this, _indexWatcher) inside the drain delegate so a
+    // late callback from a disposed watcher cannot mutate a newer index.
+    private static IndexWatcher? _indexWatcher;
+    private static IndexWatchMode _explicitWatchModeOverride; // per-call watch=true on IndexDirectory
+
     // Default-corpus state. The default corpus is the only corpus that is
     // wired into snapshot persistence + auto-indexing — additional named
     // corpora (issue #23) are session-only and live in _extraCorpora below.
@@ -128,6 +136,8 @@ public sealed class RetrievalTools
             _loadedAt = null;
             _lastAutoIndexAttempt = DateTimeOffset.MinValue;
             _lastAutoIndexFailureMessage = null;
+            DisposeIndexWatcher();
+            _explicitWatchModeOverride = IndexWatchMode.Off;
         }
     }
 
@@ -250,6 +260,8 @@ public sealed class RetrievalTools
         string? corpus = null,
         [Description("Output mode: 'text' (default, human-readable) or 'json' (stable structured envelope, issue #66).")]
         string? format = null,
+        [Description("If true, start a background watcher (#78 Gap D) on the indexed directory so edits during this session refresh the index automatically. Honours KOSHI_INDEX_WATCH=on|poll when set; overrides env-off when explicitly true. Default: env policy.")]
+        bool? watch = null,
         RequestContext<CallToolRequestParams>? context = null,
         CancellationToken cancellationToken = default)
     {
@@ -258,6 +270,37 @@ public sealed class RetrievalTools
         if (fmtErr is not null)
             return IndexDirectoryError(fmt, OutputErrorCodes.InvalidFormat, fmtErr);
 
+        // #78 Gap D: per-call watch=true|false is threaded as a parameter
+        // (not mutated into process-global state) so concurrent or
+        // overlapping IndexDirectory calls cannot stomp each other's
+        // intent. Env-watch / env-poll still wins on mode (more conservative
+        // fallback for network mounts); see ResolveWatchMode.
+        IndexWatchMode? perCallWatch = watch switch
+        {
+            true => IndexWatchMode.Watch,
+            false => IndexWatchMode.Off,
+            _ => null,
+        };
+
+        return await IndexDirectoryCore(
+            ToolName, fmt, path, pattern, maxFileSizeKb, maxFiles,
+            maxTokens, overlapTokens, corpus, perCallWatch, context, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string> IndexDirectoryCore(
+        string toolName,
+        OutputFormat fmt,
+        string? path,
+        string? pattern,
+        int maxFileSizeKb,
+        int maxFiles,
+        int? maxTokens,
+        int? overlapTokens,
+        string? corpus,
+        IndexWatchMode? perCallWatchOverride,
+        RequestContext<CallToolRequestParams>? context,
+        CancellationToken cancellationToken)
+    {
         var dirPath = ResolveIndexPath(path);
         if (dirPath is null)
         {
@@ -383,7 +426,7 @@ public sealed class RetrievalTools
         bool snapshotSaved;
         if (isDefault)
         {
-            snapshotSaved = ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration);
+            snapshotSaved = ReplaceIndex(allChunks, source: dirPath, enumeration: enumeration, perCallWatchOverride: perCallWatchOverride);
         }
         else
         {
@@ -417,7 +460,7 @@ public sealed class RetrievalTools
                 SnapshotPath: snapshotPath,
                 SnapshotSaved: snapshotSaved);
             return OutputFormatting.Ok(
-                ToolName, data,
+                toolName, data,
                 KoshiOutputJsonContext.Default.JsonEnvelopeIndexDirectoryResultData);
         }
 
@@ -949,6 +992,7 @@ public sealed class RetrievalTools
             // re-attempt KOSHI_INDEX_PATH immediately (#31).
             _lastAutoIndexAttempt = DateTimeOffset.MinValue;
             _lastAutoIndexFailureMessage = null;
+            DisposeIndexWatcher();
         }
 
         // _persistence.Delete returns the ground-truth result (true iff a
@@ -1076,6 +1120,15 @@ public sealed class RetrievalTools
                 $"'{envelope.SourcePath ?? "(unknown)"}' (saved {envelope.SavedAt:u}).");
             if (warning is not null)
                 Console.Error.WriteLine($"[koshi] {warning}");
+
+            // #78 Gap D: auto-start the watcher if the snapshot was loaded
+            // from an on-disk source and the env says to watch.
+            if (envelope.SourcePath is not null
+                && envelope.SourcePath != ContentFingerprint.InMemorySource
+                && Directory.Exists(envelope.SourcePath))
+            {
+                MaybeStartIndexWatcher(envelope.SourcePath, envelope.Enumeration);
+            }
         }
     }
 
@@ -1193,12 +1246,13 @@ public sealed class RetrievalTools
     /// return value, not on <c>_persistence.IsEnabled</c> alone — IO can
     /// fail and the user deserves an honest answer.
     /// </summary>
-    private static bool ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration)
+    private static bool ReplaceIndex(List<Chunk> chunks, string source, IndexEnumerationParams? enumeration, IndexWatchMode? perCallWatchOverride = null)
     {
         var retriever = new KeywordRetriever();
         retriever.Index(chunks);
 
         var fingerprint = ContentFingerprint.Compute(source, enumeration);
+        bool savedOk;
 
         lock (_lock)
         {
@@ -1217,9 +1271,18 @@ public sealed class RetrievalTools
             // failure cache so a future clear + retry isn't blocked by stale
             // throttle state (#31).
             _lastAutoIndexFailureMessage = null;
+
+            // #78 Gap D: snapshot save under the same lock as the in-memory
+            // swap so that concurrent watcher drains and manual re-indexes
+            // cannot leave memory and disk pointing at different generations.
+            // The vault watcher uses the simpler dirty-bit pattern because its
+            // memory is per-file; ours is corpus-wide and must stay coherent.
+            savedOk = _persistence.Save(source, fingerprint, enumeration, chunks);
+
+            MaybeStartIndexWatcher(source, enumeration, perCallWatchOverride);
         }
 
-        return _persistence.Save(source, fingerprint, enumeration, chunks);
+        return savedOk;
     }
 
     /// <summary>
@@ -1250,5 +1313,348 @@ public sealed class RetrievalTools
         // the resolver guarantees a non-null absolute IndexPath.
         return PathConfig.Default.IndexPath;
     }
+
+    // ---------------------------------------------------------------------
+    // #78 Gap D — IndexWatcher integration
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Defaults for the watcher's debounce + poll cadence. Both overridable
+    /// via env vars (<c>KOSHI_INDEX_WATCH_DEBOUNCE_MS</c>,
+    /// <c>KOSHI_INDEX_WATCH_POLL_SECONDS</c>) for users on slow disks /
+    /// network mounts where the defaults misbehave.
+    /// </summary>
+    internal const int DefaultWatchDebounceMs = 2000;
+    internal const int DefaultWatchPollSeconds = 30;
+
+    /// <summary>
+    /// Decide whether to start a watcher and (if so) of which mode. The
+    /// per-call <c>watch=true</c> on <c>koshi_index_directory</c> overrides
+    /// env-off for the duration of the resulting index; env-poll is preserved
+    /// even when per-call says only "watch=on" (env wins on the mode choice
+    /// for the more conservative poll fallback). The override is passed as a
+    /// parameter — not via process-global state — so concurrent IndexDirectory
+    /// calls cannot stomp each other's intent (rubber-duck #78 round-2).
+    /// </summary>
+    private static IndexWatchMode ResolveWatchMode(IndexWatchMode? perCallWatchOverride = null)
+    {
+        var envMode = IndexWatcher.ParseModeFromEnv(Environment.GetEnvironmentVariable("KOSHI_INDEX_WATCH"));
+        if (envMode != IndexWatchMode.Off) return envMode;
+        if (perCallWatchOverride.HasValue) return perCallWatchOverride.Value;
+        return _explicitWatchModeOverride;
+    }
+
+    /// <summary>
+    /// (Re)start the watcher for the given root. Caller MUST hold <see cref="_lock"/>.
+    /// Disposes any previously-running watcher first so old callbacks cannot
+    /// mutate the new corpus (the drain delegate also generation-checks via
+    /// <c>ReferenceEquals(this, _indexWatcher)</c> for defence in depth).
+    /// </summary>
+    private static void MaybeStartIndexWatcher(string source, IndexEnumerationParams? enumeration, IndexWatchMode? perCallWatchOverride = null)
+    {
+        var mode = ResolveWatchMode(perCallWatchOverride);
+
+        DisposeIndexWatcher();
+
+        if (mode == IndexWatchMode.Off) return;
+        if (string.IsNullOrEmpty(source) || source == ContentFingerprint.InMemorySource) return;
+        if (!Directory.Exists(source)) return;
+
+        var debounce = TimeSpan.FromMilliseconds(
+            ReadIntEnv("KOSHI_INDEX_WATCH_DEBOUNCE_MS", DefaultWatchDebounceMs, min: 50, max: 60_000));
+        var pollInterval = TimeSpan.FromSeconds(
+            ReadIntEnv("KOSHI_INDEX_WATCH_POLL_SECONDS", DefaultWatchPollSeconds, min: 1, max: 3600));
+
+        // Resolve enumeration knobs once so the watcher's predicates match
+        // exactly what the initial enumeration would have produced.
+        var pattern = enumeration?.Pattern;
+        var maxBytes = enumeration?.MaxFileSizeBytes ?? (DefaultMaxFileSizeKb * 1024L);
+        var maxFiles = enumeration?.MaxFiles ?? DefaultMaxFiles;
+        var rootFull = Path.GetFullPath(source);
+        var snapshotPath = _persistence.Path;
+
+        // Path predicate: drop events for the snapshot file itself and for
+        // anything excluded by SafeFileEnumerator. This is the path-based
+        // predicate — it correctly admits deleted paths so their chunks can
+        // be removed, leaving the file-state check to the drain reader.
+        bool PathPredicate(string fullPath)
+        {
+            if (snapshotPath is not null
+                && string.Equals(Path.GetFullPath(fullPath), snapshotPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (snapshotPath is not null
+                && string.Equals(Path.GetFullPath(fullPath), snapshotPath + ".tmp", StringComparison.OrdinalIgnoreCase))
+                return false;
+            return SafeFileEnumerator.IsPathLikelyIndexed(fullPath, pattern);
+        }
+
+        IEnumerable<string> PollEnumerator()
+        {
+            try { return SafeFileEnumerator.EnumerateIndexableFiles(rootFull, pattern, maxBytes, maxFiles).ToList(); }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+                    or NotSupportedException or PathTooLongException or ArgumentException)
+            {
+                Console.Error.WriteLine($"[koshi] Index watcher poll-enumerate failed: {ex.Message}");
+                return [];
+            }
+        }
+
+        IndexWatcher? created = null;
+        Task<IndexWatcherDrainResult> Drain(IReadOnlyList<string> pendingRel, CancellationToken ct)
+        {
+            return Task.FromResult(ApplyWatcherDrain(created!, rootFull, pattern, maxBytes, pendingRel, ct));
+        }
+
+        created = new IndexWatcher(
+            rootPath: rootFull,
+            mode: mode,
+            debounce: debounce,
+            pollInterval: pollInterval,
+            pathPredicate: PathPredicate,
+            pollEnumerator: PollEnumerator,
+            onDrain: Drain);
+
+        _indexWatcher = created;
+    }
+
+    private static int ReadIntEnv(string name, int fallback, int min, int max)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        if (!int.TryParse(raw.Trim(), out var v)) return fallback;
+        return Math.Clamp(v, min, max);
+    }
+
+    private static void DisposeIndexWatcher()
+    {
+        var w = _indexWatcher;
+        _indexWatcher = null;
+        try { w?.Dispose(); } catch { /* best effort */ }
+    }
+
+    /// <summary>
+    /// Drain callback shared by Watch and Poll modes. Applies the pending
+    /// path set to the in-memory corpus and writes a new snapshot. Returns
+    /// a <see cref="IndexWatcherDrainResult"/> describing the outcome so the
+    /// watcher can update its telemetry and degraded state.
+    ///
+    /// <para>Reads happen OUTSIDE <see cref="_lock"/> (file IO + chunking can
+    /// be slow) and the result is published under the lock with a generation
+    /// check (<c>ReferenceEquals(self, _indexWatcher)</c>). If a manual
+    /// re-index or a clear runs between the read and the publish, the drain
+    /// is dropped silently and a future event will retry.</para>
+    /// </summary>
+    private static IndexWatcherDrainResult ApplyWatcherDrain(
+        IndexWatcher self,
+        string rootFull,
+        string? pattern,
+        long maxBytes,
+        IReadOnlyList<string> pendingRel,
+        CancellationToken ct)
+    {
+        if (pendingRel.Count == 0) return new IndexWatcherDrainResult(false, false, null);
+
+        // Snapshot existing chunks under the lock so we don't read a list
+        // that's concurrently mutated. Generation check ensures we don't
+        // process events for a corpus that has since been replaced.
+        List<Chunk> currentChunks;
+        IndexEnumerationParams? enumeration;
+        lock (_lock)
+        {
+            if (!ReferenceEquals(self, _indexWatcher)) return new IndexWatcherDrainResult(false, false, "stale watcher");
+            if (_indexedFromPath is null || !string.Equals(Path.GetFullPath(_indexedFromPath), rootFull, StringComparison.OrdinalIgnoreCase))
+                return new IndexWatcherDrainResult(false, false, "root changed");
+            currentChunks = [.. _indexedChunks];
+            enumeration = _indexedEnumeration;
+        }
+
+        var chunkerCfg = ChunkerConfig.Resolve(enumeration is null ? null : (int?)null, null);
+        var chunker = new FixedSizeChunker(TokenCounters.Shared, chunkerCfg.MaxTokens, chunkerCfg.OverlapTokens);
+        var maxFiles = enumeration?.MaxFiles ?? DefaultMaxFiles;
+
+        // Build a working copy keyed by normalized relpath so chunk replacement is O(N).
+        var byPath = currentChunks.GroupBy(c => Normalize(c.Metadata.Source))
+                                  .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        bool anyError = false;
+        string? firstErrorMessage = null;
+
+        foreach (var relOrFull in pendingRel)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // The watcher may emit relative paths (normal case) or absolute
+            // paths (root-sentinel case from error handler). Normalise.
+            string rel = relOrFull;
+            string fullPath;
+            if (Path.IsPathRooted(relOrFull))
+            {
+                fullPath = Path.GetFullPath(relOrFull);
+                try { rel = Path.GetRelativePath(rootFull, fullPath).Replace('\\', '/'); }
+                catch (ArgumentException) { continue; }
+            }
+            else
+            {
+                rel = relOrFull.Replace('\\', '/');
+                fullPath = Path.GetFullPath(Path.Combine(rootFull, rel));
+            }
+
+            // Root sentinel: full reconciliation. Clear all chunks so deleted
+            // files no longer linger; the directory-event branch below will
+            // re-enumerate the entire tree and repopulate. Without this clear
+            // the per-chunk dictionary still holds removed-file entries
+            // because prefix-match on "./" never matches "foo.md".
+            var isRootSentinel = string.Equals(rel, ".", StringComparison.Ordinal)
+                              || string.Equals(fullPath, rootFull, StringComparison.OrdinalIgnoreCase);
+            if (isRootSentinel) byPath.Clear();
+
+            // Directory event: prefix-remove all chunks under it, then
+            // enumerate the subtree for adds (only if it currently exists).
+            if (Directory.Exists(fullPath))
+            {
+                if (!isRootSentinel)
+                {
+                    var prefix = rel.TrimEnd('/') + "/";
+                    foreach (var key in byPath.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+                        byPath.Remove(key);
+                }
+
+                try
+                {
+                    foreach (var child in SafeFileEnumerator.EnumerateIndexableFiles(fullPath, pattern, maxBytes, maxFiles))
+                    {
+                        var childRel = Path.GetRelativePath(rootFull, child).Replace('\\', '/');
+                        if (TryReadAndChunk(child, childRel, chunker, out var newChunks, out var err))
+                            byPath[Normalize(childRel)] = newChunks;
+                        else if (err is not null) { anyError = true; firstErrorMessage ??= err; }
+                    }
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+                        or NotSupportedException or PathTooLongException or ArgumentException)
+                {
+                    anyError = true; firstErrorMessage ??= ex.Message;
+                }
+                continue;
+            }
+
+            // File event: remove existing chunks for this path.
+            byPath.Remove(Normalize(rel));
+
+            // If file exists and is currently indexable, re-read and add chunks.
+            if (File.Exists(fullPath))
+            {
+                if (!SafeFileEnumerator.IsCurrentlyIndexable(fullPath, pattern, maxBytes)) continue;
+                if (TryReadAndChunk(fullPath, rel, chunker, out var fileChunks, out var fileErr))
+                    byPath[Normalize(rel)] = fileChunks;
+                else if (fileErr is not null) { anyError = true; firstErrorMessage ??= fileErr; }
+                continue;
+            }
+
+            // Path doesn't exist as file or directory: could be a deleted
+            // file (handled by the byPath.Remove above) OR the old side of
+            // a directory rename / a deleted directory whose child events
+            // never fired (some FSW back-ends, network mounts). Also do a
+            // subtree prefix-remove so any chunks under the old directory
+            // are reclaimed (rubber-duck #78 round-2 #2). Idempotent: if
+            // no chunks share this prefix the dictionary scan is a no-op.
+            var ghostPrefix = rel.TrimEnd('/') + "/";
+            foreach (var key in byPath.Keys.Where(k => k.StartsWith(ghostPrefix, StringComparison.OrdinalIgnoreCase)).ToList())
+                byPath.Remove(key);
+        }
+
+        var rebuilt = byPath.Values.SelectMany(x => x).ToList();
+        if (rebuilt.Count > MaxChunks)
+        {
+            return new IndexWatcherDrainResult(false, true,
+                $"incremental update would exceed MaxChunks ({rebuilt.Count} > {MaxChunks}); kept previous index");
+        }
+
+        // Don't publish a corrupt snapshot if any file failed to read — the
+        // previous in-memory index is still serving correct results, and the
+        // user will see the degraded reason in koshi_health.
+        if (anyError)
+        {
+            return new IndexWatcherDrainResult(false, true,
+                $"transient read failure: {firstErrorMessage} (snapshot not updated)");
+        }
+
+        var retriever = new KeywordRetriever();
+        retriever.Index(rebuilt);
+        var fingerprint = ContentFingerprint.Compute(rootFull, enumeration);
+
+        lock (_lock)
+        {
+            if (!ReferenceEquals(self, _indexWatcher)) return new IndexWatcherDrainResult(false, false, "stale watcher");
+            if (_indexedFromPath is null || !string.Equals(Path.GetFullPath(_indexedFromPath), rootFull, StringComparison.OrdinalIgnoreCase))
+                return new IndexWatcherDrainResult(false, false, "root changed");
+            _indexedChunks = rebuilt;
+            _keywordRetriever = retriever;
+            _persistence.Save(rootFull, fingerprint, enumeration, rebuilt);
+        }
+
+        return new IndexWatcherDrainResult(true, false, null);
+
+        static string Normalize(string s) => s.Replace('\\', '/');
+    }
+
+    private static bool TryReadAndChunk(
+        string fullPath, string relPath, FixedSizeChunker chunker,
+        out List<Chunk> chunks, out string? error)
+    {
+        chunks = [];
+        error = null;
+        try
+        {
+            var content = File.ReadAllText(fullPath);
+            if (string.IsNullOrWhiteSpace(content)) return true;
+            var ext = Path.GetExtension(fullPath).TrimStart('.');
+            chunks = chunker.Chunk(content, relPath, string.IsNullOrEmpty(ext) ? "document" : ext).ToList();
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+                or NotSupportedException or PathTooLongException or ArgumentException)
+        {
+            error = $"{Path.GetFileName(fullPath)}: {ex.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>Telemetry snapshot for <c>koshi_health</c> (#78 Gap D).</summary>
+    internal static (string mode, string status, string? root, bool degraded, string? degradedReason,
+                     int pendingEvents, int totalRebuilds, DateTimeOffset? lastEventAt, DateTimeOffset? lastRebuildAt,
+                     int debounceMs, int pollIntervalSeconds) GetIndexWatcherStatus()
+    {
+        var w = _indexWatcher;
+        if (w is null)
+            return ("off", "disabled (mode=off)", null, false, null, 0, 0, null, null,
+                    DefaultWatchDebounceMs, DefaultWatchPollSeconds);
+        return (
+            w.Mode.ToString().ToLowerInvariant(),
+            w.Status,
+            w.RootPath,
+            w.IsDegraded,
+            w.DegradedReason,
+            w.PendingEvents,
+            w.TotalRebuilds,
+            w.LastEventAt,
+            w.LastRebuildAt,
+            (int)w.Debounce.TotalMilliseconds,
+            (int)w.PollInterval.TotalSeconds);
+    }
+
+    /// <summary>Test seam: synchronously drain the watcher one cycle.</summary>
+    internal static Task<int> DrainIndexWatcherForTest(CancellationToken ct = default) =>
+        _indexWatcher?.DrainNowForTest(ct) ?? Task.FromResult(0);
+
+    /// <summary>Test seam: synthesise an event without touching the filesystem.</summary>
+    internal static void RaiseIndexWatcherEventForTest(string fullPath) =>
+        _indexWatcher?.RaiseForTest(fullPath);
+
+    /// <summary>Test seam: set the per-call watch override before calling IndexDirectory.</summary>
+    internal static void SetExplicitWatchOverrideForTest(IndexWatchMode mode) =>
+        _explicitWatchModeOverride = mode;
 
 }
