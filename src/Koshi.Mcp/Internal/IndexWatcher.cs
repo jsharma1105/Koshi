@@ -491,10 +491,14 @@ internal sealed class IndexWatcher : IDisposable
             catch (AggregateException ex)
             {
                 // Expected: TaskCanceledException from the cancelled CTS.
-                foreach (var inner in ex.Flatten().InnerExceptions)
+                // Filter explicitly with .Where so the intent (log every
+                // non-cancellation inner) is obvious at a glance. (CodeQL
+                // cs/linq/missed-where.)
+                var unexpected = ex.Flatten().InnerExceptions
+                    .Where(inner => inner is not OperationCanceledException);
+                foreach (var inner in unexpected)
                 {
-                    if (inner is not OperationCanceledException)
-                        Console.Error.WriteLine($"[koshi] IndexWatcher worker shutdown: {inner.Message}");
+                    Console.Error.WriteLine($"[koshi] IndexWatcher worker shutdown: {inner.Message}");
                 }
             }
         }

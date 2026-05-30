@@ -67,7 +67,7 @@ public sealed class IndexWatcherOverflowTests : IDisposable
         // dispose. The Opus O7 fix awaits the worker + poll tasks with a
         // 5s timeout; we assert dispose completes well within that.
         using var done = new ManualResetEventSlim(false);
-        var watcher = new IndexWatcher(
+        using var watcher = new IndexWatcher(
             rootPath: _root,
             mode: IndexWatchMode.Watch,
             debounce: TimeSpan.FromMilliseconds(20),

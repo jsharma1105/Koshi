@@ -61,7 +61,12 @@ internal sealed class StdioMcpHandshake : IMcpHandshake
         try { stdout = await stdoutTask; }
         catch (OperationCanceledException) { return null; }
         // Best-effort drain — failure here doesn't affect the version probe.
-        try { await stderrTask; } catch { /* ignore */ }
+        // Narrow catch: only swallow the exceptions ReadToEndAsync can throw
+        // on a stream that has already closed or been cancelled. Anything
+        // else (OOM, ThreadAbort, etc.) should propagate.
+        try { await stderrTask; }
+        catch (Exception ex) when (
+            ex is OperationCanceledException or IOException or ObjectDisposedException) { _ = ex; }
         var trimmed = stdout.Trim();
         // Expected format: "koshi-mcp 0.8.1" (single line). Be tolerant of
         // future additions ("koshi-mcp 0.9.0 (commit abc)") and older builds.
