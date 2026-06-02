@@ -58,6 +58,26 @@ printf '  • Installed persona files\n'
 printf '  • Indexed corpora / vaults under .koshi/ in your projects\n'
 printf '  • Team registry under .koshi/teams.json\n\n'
 
+# Surface concurrent .NET-tool installs the user may not realise are
+# present. `dotnet tool install -g Koshi.Mcp` writes to
+# ~/.dotnet/tools/koshi-mcp and wins on PATH for anyone who used that
+# path. Removing one without the other leaves the user thinking
+# uninstall failed because `koshi-mcp` still resolves.
+if command -v dotnet >/dev/null 2>&1; then
+    if dt_list="$(dotnet tool list -g 2>/dev/null)"; then
+        dt_found=""
+        printf '%s\n' "$dt_list" | grep -Eq '^[[:space:]]*koshi\.mcp[[:space:]]' && dt_found="$dt_found Koshi.Mcp"
+        printf '%s\n' "$dt_list" | grep -Eq '^[[:space:]]*koshi\.agents[[:space:]]' && dt_found="$dt_found Koshi.Agents"
+        if [ -n "$dt_found" ]; then
+            warn "Detected concurrent .NET tool install(s):$dt_found"
+            warn "This script does NOT remove .NET-tool installs. To finish removal, run:"
+            for pkg in $dt_found; do
+                warn "  dotnet tool uninstall -g $pkg"
+            done
+        fi
+    fi
+fi
+
 if [ "$YES" -eq 0 ]; then
     if [ ! -t 0 ]; then
         err "Refusing to uninstall without --yes when stdin is not a TTY."

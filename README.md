@@ -102,7 +102,7 @@ before assuming it's you.
 After install, try:
 
 ```sh
-koshi-agents doctor   # verify every detected client sees the server
+koshi-mcp --list-tools   # confirm the server starts and lists its tools
 ```
 
 Then ask your agent any project question; it will recall what it knows
