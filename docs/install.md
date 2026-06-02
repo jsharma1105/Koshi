@@ -11,7 +11,7 @@ or indexes.
 |---|---|
 | [Shell installer](#shell-installer-recommended) | You want one command. Default. |
 | [`pip install koshi`](#python--pip-install-koshi) | You are a Python host (no .NET install). |
-| [`dotnet tool install --global Koshi.Mcp`](#net--dotnet-tool-install) | You already have the .NET 9 SDK. |
+| [`dotnet tool install --global Koshi.Mcp`](#net--dotnet-tool-install) | You already have the .NET 10 SDK. |
 | [Native AOT binary (manual)](#native-aot-binary-manual) | You want full control over the download / placement / verification step. |
 
 ---
@@ -116,7 +116,7 @@ dotnet tool install --global Koshi.Agents
 koshi-agents install --client both
 ```
 
-Requires the .NET 9 SDK on `PATH`. The binary lives at
+Requires the .NET 10 SDK on `PATH`. The binary lives at
 `$HOME/.dotnet/tools/koshi-mcp` (Unix) or
 `%USERPROFILE%\.dotnet\tools\koshi-mcp.exe` (Windows).
 

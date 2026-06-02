@@ -22,7 +22,7 @@ namespace Koshi.Mcp.Cli;
 ///         fast-forward-pull the vault to the declared path, register the
 ///         declared team in <c>&lt;projectRoot&gt;/.koshi/teams.json</c>.</item>
 ///   <item>Print a Next Steps banner: restart your client(s), run
-///         <c>koshi-agents doctor</c> to verify, optional smoke command.</item>
+///         <c>koshi-mcp --list-tools</c> to verify the server is reachable.</item>
 /// </list>
 ///
 /// <para>
@@ -36,9 +36,10 @@ namespace Koshi.Mcp.Cli;
 ///   <item>An existing checkout whose <c>git remote get-url origin</c> does
 ///         not match the declared <c>vault.repo</c> is never overwritten —
 ///         the wizard fails and prints both URLs (B4).</item>
-///   <item>An existing <c>mcpServers.koshi</c> entry is left strictly alone,
-///         and the user is told to run <c>koshi-agents doctor</c> to verify
-///         it actually launches (B3 — present ≠ valid).</item>
+///   <item>An existing <c>mcpServers.koshi</c> entry is left strictly alone;
+///         the user is told the existing entry was preserved and pointed at
+///         <c>koshi-mcp --list-tools</c> to confirm the binary itself works
+///         (B3 — present ≠ valid).</item>
 /// </list>
 ///
 /// <para>
@@ -346,13 +347,15 @@ internal static class InitCommand
         stdout.WriteLine();
         stdout.WriteLine("Next steps:");
         stdout.WriteLine("  1. Restart your MCP client(s) so they re-read the config.");
-        stdout.WriteLine("  2. Verify the koshi server is reachable:");
-        stdout.WriteLine("       koshi-agents doctor");
-        stdout.WriteLine("  3. List Koshi's tools to confirm registration:");
+        stdout.WriteLine("  2. Verify Koshi's tools are reachable:");
         stdout.WriteLine("       koshi-mcp --list-tools");
+        stdout.WriteLine();
+        stdout.WriteLine("     For full client-wiring diagnostics (separate tool):");
+        stdout.WriteLine("       dotnet tool install --global Koshi.Agents");
+        stdout.WriteLine("       koshi-agents doctor");
         if (teamYml?.Team is not null)
         {
-            stdout.WriteLine($"  4. Your team '{teamYml.Team.Id}' is live; teammates can run");
+            stdout.WriteLine($"  3. Your team '{teamYml.Team.Id}' is live; teammates can run");
             stdout.WriteLine("       koshi-mcp init");
             stdout.WriteLine("     in this repo to get the same wiring.");
         }
@@ -469,9 +472,13 @@ internal static class InitCommand
                 stdout.WriteLine($"  registered koshi MCP entry → {reg.ConfigPath} (backup: {reg.BackupPath})");
                 return false;
             case McpRegisterOutcome.AlreadyPresent:
-                // B3: present ≠ valid. Tell the user to verify.
-                stdout.WriteLine($"  koshi MCP entry already present in {reg.ConfigPath}");
-                stdout.WriteLine($"    (run 'koshi-agents doctor' to confirm it actually launches)");
+                // B3: present ≠ valid. The existing entry is left untouched
+                // (it may have been intentionally customised). Point users at
+                // --list-tools so they can at least confirm the binary works;
+                // for full config-launch validation, koshi-agents doctor is
+                // a separate install (`dotnet tool install -g Koshi.Agents`).
+                stdout.WriteLine($"  koshi MCP entry already present in {reg.ConfigPath} (left untouched)");
+                stdout.WriteLine($"    (run 'koshi-mcp --list-tools' to confirm the binary works)");
                 return false;
             case McpRegisterOutcome.DryRun:
                 stdout.WriteLine($"  [dry-run] {reg.ErrorMessage}");
