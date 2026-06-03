@@ -5,6 +5,120 @@ All notable changes to the Koshi MCP Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-06-02
+
+This is a focused patch release that repairs the v0.9.0 shell-installer
+onboarding path end-to-end. Walking the documented `curl | sh` /
+`irm | iex` install → verify → uninstall flow on a clean machine
+surfaced six issues that blocked a fresh user; all six are fixed here
+plus a follow-up pass that makes the CLI self-consistent (no banner
+text or doc references a verb the shell installer does not ship). No
+new features, no behavior changes for users already on v0.9.0 with a
+working install — but **every fresh `install.sh`/`install.ps1` run on
+v0.9.0 is broken**, so anyone landing on the README today needs this
+patch. 868/868 tests still green.
+
+### Fixed (shell installer + uninstaller — PR #114)
+
+- **`install.{ps1,sh}` wizard-detection false-negatived v0.9.0.** The
+  old probe `^\s*init\b` did not match v0.9.0's help layout
+  (`  koshi-mcp init   <description>` — the first token on the line is
+  `koshi-mcp`, not `init`). Result: every fresh shell-installer run
+  printed "This binary does not yet support the init wizard" and fell
+  through to a legacy `koshi-agents install` instruction — which the
+  shell installer does not ship, so the user was stuck. New probe is
+  two-layered with a 5s timeout per attempt: (a) `koshi-mcp init --help`
+  exits 0 AND output mentions `init`; (b) fallback grep on
+  `koshi-mcp --help` for `^init` OR `koshi-mcp init` (matches old and
+  new help layouts). Timeout prevents legacy binaries that ignore the
+  arg and start the stdio host from hanging the installer.
+- **`uninstall.ps1` always failed under `irm | iex`.** `Read-Host`
+  throws "PowerShell is in NonInteractive mode" when stdin is
+  redirected, which is exactly what `iex` does. Fixed by auto-setting
+  `$Yes` when `[Console]::IsInputRedirected` is true (matching the
+  pattern `install.ps1` already used).
+- **README + install.ps1 "Verify" line + docs pointed at `koshi-mcp
+  doctor` / `koshi-agents doctor`**, neither of which works for
+  shell-installer users (`koshi-mcp doctor` was not a subcommand and
+  silently started the stdio server — worst case, looked like success;
+  `koshi-agents` is not installed by the shell installer). Primary
+  smoke-test verb is now `koshi-mcp --list-tools` (always available, no
+  extra install). `koshi-agents doctor` is kept in troubleshooting /
+  client-setup as a deeper-check option with an explicit
+  `dotnet tool install -g Koshi.Agents` prerequisite.
+- **`uninstall.{ps1,sh}` now probe `dotnet tool list -g`** and warn
+  when `Koshi.Mcp` / `Koshi.Agents` are installed as .NET tools. The
+  uninstaller does not remove them automatically (different install
+  surface) but now prints the exact `dotnet tool uninstall -g` commands
+  needed to finish removal.
+- **`uninstall.ps1` pre-flight check for a running `koshi-mcp.exe`.**
+  Splits running processes into "ours" (same `Path` as this prefix,
+  stoppable under `-Force`) and "others" (e.g. a side-by-side .NET-tool
+  install — reported but never touched even under `-Force`). Without
+  the pre-flight, file replacement failed partway through with "Access
+  denied" after the binary download had already happened.
+- **`docs/install.md`** Windows uninstall snippet changed from
+  `irm ... | iex` to `& ([scriptblock]::Create((irm ...)))`, which
+  still works without args but lets users forward `-Force` when needed.
+- Removed two stale references to nonexistent `-Purge` / `-No` flags
+  in `uninstall.ps1`'s comment header.
+
+### Fixed (CLI self-consistency follow-ups — PR #114)
+
+- **`koshi-mcp doctor` silent-stdio-launch footgun.** Previously fell
+  through to the stdio host and hung waiting for a client `initialize`
+  request — looked like success. Now caught explicitly in `Program.cs`:
+  prints guidance pointing at `koshi-mcp --list-tools` (always
+  available) and the separate `Koshi.Agents` install for full
+  client-wiring diagnostics, exits 2. Same treatment for any unknown
+  leading positional arg (typos like `help`, `status`, `start`).
+  Flags (anything starting with `-`) are untouched, so `--version`,
+  `--help`, `--list-tools`, `--describe` continue to flow through their
+  existing handlers and the MCP host still starts normally for the bare
+  `koshi-mcp` invocation that clients use.
+- **`koshi-mcp init` "Next Steps" banner now works for
+  shell-installer users.** Step 2 is `koshi-mcp --list-tools` (always
+  available, even without `Koshi.Agents`). `koshi-agents doctor` is
+  demoted to an optional "for full client-wiring diagnostics" line that
+  includes the `dotnet tool install --global Koshi.Agents`
+  prerequisite. The `EmitRegister` `AlreadyPresent` message is reworded:
+  existing entries are left untouched and the user is told
+  `--list-tools` confirms the binary works (it does not validate that
+  the existing config entry launches — that's what `koshi-agents
+  doctor` is for).
+- **`tests/Koshi.Mcp.SmokeTest/Program.cs` regression guard.** Mirrors
+  the existing `--version` guard: spawns `koshi-mcp doctor`, asserts
+  exit within 5s, non-zero exit code, stderr contains the "not a
+  subcommand" guidance, and neither stream contains JSON-RPC protocol
+  markers (proves the stdio host never started).
+- **`docs/install.md`** correctly requires **.NET 10 SDK** (the repo's
+  csproj files all target `net10.0` and there is no `global.json`
+  pinning anything different); a transient .NET 9 SDK regression
+  introduced mid-PR was reverted.
+
+### Release scope
+
+- `Koshi.Mcp` 0.9.1 carries the CLI self-consistency fixes
+  (`Program.cs`, `InitCommand.cs`, `McpConfigWriter.cs`,
+  `Koshi.Mcp.SmokeTest`).
+- `Koshi.Agents` 0.9.1 is functionally identical to 0.9.0 — no source
+  changes — but the version is bumped in sync with `Koshi.Mcp` to keep
+  the unified release tagging convention the project follows.
+- `scripts/install.{ps1,sh}` + `scripts/uninstall.{ps1,sh}` carry the
+  installer/uninstaller fixes and are republished alongside the
+  release.
+- Native AOT binaries (`koshi-mcp-<rid>`) and the Python `koshi` wheel
+  are republished at 0.9.1 so the manifest hashes and binary version
+  assertions in the smoke tests line up with the tag.
+
+### Stats
+
+- **2 commits, 1 PR** (#114, squash-merged) since v0.9.0.
+- **868 / 868 tests green** across `dotnet test` on `ubuntu-latest`,
+  `macos-latest`, `windows-latest`.
+- End-to-end install → verify → uninstall flow re-tested on Windows /
+  win-x64 against the patched scripts.
+
 ## [0.9.0] - 2026-05-30
 
 This is a substantial minor release covering 33 commits across 27 PRs since
