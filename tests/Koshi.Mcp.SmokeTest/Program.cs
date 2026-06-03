@@ -131,6 +131,64 @@ psi.StandardOutputEncoding = Encoding.UTF8;
     }
 }
 
+// ─── Pre-check: `doctor` exits non-zero without starting the server ───────
+// Regression guard for the dogfood finding where `koshi-mcp doctor` would
+// silently fall through to the stdio host, looking like success but
+// actually starting the server and hanging (waiting for a client
+// `initialize` request). Validates that:
+//   1. Process exits within a couple of seconds (not hung on stdin).
+//   2. Exit code is non-zero (we use 2 for usage errors; tolerate any
+//      non-zero so future tweaks remain valid).
+//   3. Stderr contains the explicit "not a subcommand" guidance.
+//   4. Neither stream contains JSON-RPC protocol markers — proves the
+//      stdio host never started.
+// Together with the `--version` guard this pins the dispatch contract:
+// known leading positional `doctor` is rejected loudly, not absorbed.
+{
+    var doctorPsi = exePath is not null
+        ? new ProcessStartInfo(exePath, "doctor")
+        : new ProcessStartInfo("dotnet", $"\"{dllPath}\" doctor");
+    doctorPsi.RedirectStandardOutput = true;
+    doctorPsi.RedirectStandardError = true;
+    doctorPsi.UseShellExecute = false;
+    doctorPsi.StandardOutputEncoding = Encoding.UTF8;
+
+    var dproc = Process.Start(doctorPsi)!;
+    var stdoutTask = dproc.StandardOutput.ReadToEndAsync();
+    var stderrTask = dproc.StandardError.ReadToEndAsync();
+    if (!dproc.WaitForExit(5000))
+    {
+        try { dproc.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { /* best effort */ }
+        catch (System.ComponentModel.Win32Exception) { /* best effort */ }
+        catch (NotSupportedException) { /* best effort */ }
+        Console.Error.WriteLine("[doctor] FAIL: process did not exit within 5s (likely fell through to stdio host).");
+        return 1;
+    }
+    var dout = (await stdoutTask).Trim();
+    var derr = (await stderrTask).Trim();
+    Console.Error.WriteLine($"[doctor] exit={dproc.ExitCode}");
+    if (dout.Length > 0) Console.Error.WriteLine($"[doctor] stdout='{dout}'");
+    if (derr.Length > 0) Console.Error.WriteLine($"[doctor] stderr='{derr}'");
+    if (dproc.ExitCode == 0)
+    {
+        Console.Error.WriteLine("[doctor] FAIL: exit code 0 — 'doctor' must be rejected, not absorbed.");
+        return 1;
+    }
+    if (!derr.Contains("not a subcommand", StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine("[doctor] FAIL: stderr did not contain the 'not a subcommand' guidance.");
+        return 1;
+    }
+    if (dout.Contains("jsonrpc", StringComparison.OrdinalIgnoreCase)
+        || dout.Contains("Content-Length", StringComparison.OrdinalIgnoreCase)
+        || derr.Contains("jsonrpc", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.Error.WriteLine("[doctor] FAIL: output contained JSON-RPC markers — stdio host should never have started.");
+        return 1;
+    }
+}
+
 // ─── Pre-seed a v0.3.0-shaped memory file ────────────────────────────────
 // Validates that the v0.4.0 AOT source-generated JsonSerializerContext can
 // still read memory files written by v0.3.0's manual JsonSerializerOptions

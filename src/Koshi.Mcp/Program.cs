@@ -27,6 +27,39 @@ if (args.Length > 0 && string.Equals(args[0], "init", StringComparison.Ordinal))
     return InitCommand.Run(args[1..], Console.Out, Console.Error, Console.In);
 }
 
+// `doctor` is provided by the separate Koshi.Agents tool. Without this
+// stub, `koshi-mcp doctor` would silently fall through to the stdio host
+// — looking like success but actually starting the server and hanging
+// (waiting for a client `initialize` request). Catch it explicitly and
+// point users at the real options.
+if (args.Length > 0 && string.Equals(args[0], "doctor", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine("koshi-mcp: 'doctor' is not a subcommand of koshi-mcp.");
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("To list the MCP tools this server exposes, run:");
+    Console.Error.WriteLine("  koshi-mcp --list-tools");
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("For a full client-wiring health check (probes Claude/Copilot configs),");
+    Console.Error.WriteLine("install the separate Koshi.Agents tool:");
+    Console.Error.WriteLine("  dotnet tool install --global Koshi.Agents");
+    Console.Error.WriteLine("  koshi-agents doctor");
+    return 2;
+}
+
+// Reject any unknown leading positional argument (e.g. typos like `help`,
+// `status`, `start`). These would otherwise fall through to the stdio host
+// and silently start the server. MCP clients invoke the configured command
+// with the configured args; `McpConfigWriter.BuildKoshiEntry()` uses bare
+// `koshi-mcp` with no positional args, so a positional here is user error.
+// Flags (starting with `-`) are left alone so `--version`, `--help`,
+// `--list-tools`, `--describe`, etc. flow through the existing handlers.
+if (args.Length > 0 && !args[0].StartsWith("-", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine($"koshi-mcp: unknown command '{args[0]}'.");
+    Console.Error.WriteLine("Run 'koshi-mcp --help' for the list of supported commands.");
+    return 2;
+}
+
 // Offline tool introspection (#67). Handled before the MCP host so the
 // process exits cleanly instead of hanging on stdin awaiting an
 // `initialize` request.

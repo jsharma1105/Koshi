@@ -16,7 +16,7 @@ The most common symptoms and what to do, grouped by audience.
 | Symptom | Fix |
 |---|---|
 | `command not found: koshi-mcp` | Ensure your tool prefix is on `PATH`. Shell installer: `~/.local/bin` (Unix) or `%LOCALAPPDATA%\Programs\Koshi` (Windows). `dotnet tool install`: `~/.dotnet/tools` (Unix) or `%USERPROFILE%\.dotnet\tools` (Windows). |
-| MCP client can't connect | Run `koshi-mcp` directly and send a JSON-RPC line. Logs appear on stderr; stdout stays silent until a request arrives. If the binary launches cleanly, the client config (path/env) is the issue — run `koshi-agents doctor`. |
+| MCP client can't connect | Run `koshi-mcp` directly and send a JSON-RPC line. Logs appear on stderr; stdout stays silent until a request arrives. If the binary launches cleanly, the client config (path/env) is the issue — see [client setup](client-setup.md) for per-client paths, or install `Koshi.Agents` (`dotnet tool install --global Koshi.Agents`) and run `koshi-agents doctor`. |
 | Vulnerability warning during install | The MCP package itself is clean. Some sibling demo projects in the source repo pull in older transitive packages — these never reach `koshi-mcp`. |
 | Wrong file written: `mcp_config.json` (underscore) | The correct filename for Copilot CLI is `mcp-config.json` (hyphen). Older releases of `Koshi.Agents` had the wrong default — upgrade to v0.7.1 or later. |
 | Server reports a version mismatch on startup | The on-disk binary version does not match the wrapper or persona installer. Reinstall the wrapper that matches the binary, or pin both to the same release tag. |
@@ -58,15 +58,19 @@ tool call ran:
 
 When in doubt, run these in order:
 
-1. **`koshi-agents doctor`** — checks every detected client config and
-   tells you the exact JSON snippet to paste if anything is missing.
-   Never writes config files.
-2. **`koshi-mcp --version`** — confirms the binary is on `PATH` and
+1. **`koshi-mcp --list-tools`** — confirms the binary is on `PATH` and
+   the server starts; enumerates every registered tool. No extra install
+   required.
+2. **`koshi-agents doctor`** (optional) — checks every detected client
+   config and tells you the exact JSON snippet to paste if anything is
+   missing. Never writes config files. Requires the companion .NET
+   tool: `dotnet tool install --global Koshi.Agents`.
+3. **`koshi-mcp --version`** — confirms the binary is on `PATH` and
    prints the version string the server will report.
-3. **Call `koshi_health` from any MCP client** — shows runtime
+4. **Call `koshi_health` from any MCP client** — shows runtime
    configuration: which env values are in effect, where each path
    resolves, indexed corpus size, memory backend kind, working set.
-4. **Read the server logs** — they go to stderr. The MCP client usually
+5. **Read the server logs** — they go to stderr. The MCP client usually
    exposes them under a "Show server logs" / "Inspect" button.
 
 ## Next steps

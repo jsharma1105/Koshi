@@ -63,7 +63,9 @@ releases.
 
 Uninstall removes the binary and the PATH entry only — MCP client configs,
 personas, indexed corpora, and the team registry are intentionally
-preserved. To uninstall:
+preserved. `dotnet tool install -g Koshi.*` installs are NOT removed by
+this script; the uninstaller will warn you and print the matching
+`dotnet tool uninstall -g` commands to run.
 
 ```sh
 # Linux / macOS
@@ -72,7 +74,9 @@ curl -fsSL https://raw.githubusercontent.com/jsharma1105/Koshi/main/scripts/unin
 
 ```powershell
 # Windows
-irm https://raw.githubusercontent.com/jsharma1105/Koshi/main/scripts/uninstall.ps1 | iex
+# Auto-accepts when piped (stdin is not a TTY). Add -Force to also stop
+# any running koshi-mcp.exe process (typically launched by an MCP client).
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jsharma1105/Koshi/main/scripts/uninstall.ps1)))
 ```
 
 ### Known constraints
@@ -158,7 +162,7 @@ pass `--no-init`.
 Verify everything is wired up:
 
 ```sh
-koshi-agents doctor
+koshi-mcp --list-tools   # the server starts and lists its tools
 ```
 
 Then restart your MCP client(s) once so they pick up the new `koshi` MCP

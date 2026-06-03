@@ -272,16 +272,43 @@ wizard_supported() {
     # The 'init' wizard subcommand was introduced after v0.8.1. Older
     # binaries silently fall through to launching the MCP stdio server,
     # which would hang the installer waiting for client messages on stdin.
-    # Probe --help for the word 'init'.
-    help_out="$("$1" --help 2>/dev/null || true)"
-    printf '%s\n' "$help_out" | grep -Eq '^[[:space:]]*init([[:space:]]|$)'
+    #
+    # We probe in two layers, each with a strict timeout so a legacy
+    # binary that ignores the argument and starts the stdio server
+    # can't hang the installer:
+    #   1. `koshi-mcp init --help` -- exit 0 AND output mentions `init`.
+    #      Exit code alone is not enough: an older binary might scan all
+    #      args for `--help`, print global help, and exit 0.
+    #   2. Fall back to grepping `koshi-mcp --help` for `init` either at
+    #      the start of a line OR alongside `koshi-mcp` (v0.9.0 lists it
+    #      as `  koshi-mcp init   <description>` -- the first token is
+    #      `koshi-mcp`, not `init`, which the older regex missed).
+    bin="$1"
+    # Pick a timeout wrapper (GNU coreutils or BSD `gtimeout`); fall back
+    # to direct invocation if neither is available (rare on modern hosts).
+    if command -v timeout >/dev/null 2>&1; then
+        TIMEOUT_CMD="timeout 5"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        TIMEOUT_CMD="gtimeout 5"
+    else
+        TIMEOUT_CMD=""
+    fi
+    init_help="$($TIMEOUT_CMD "$bin" init --help 2>/dev/null || true)"
+    init_exit=$?
+    if [ "$init_exit" -eq 0 ] && printf '%s\n' "$init_help" | grep -Eq '\binit\b'; then
+        return 0
+    fi
+    help_out="$($TIMEOUT_CMD "$bin" --help 2>/dev/null || true)"
+    printf '%s\n' "$help_out" | grep -Eq '^[[:space:]]*init([[:space:]]|$)|koshi-mcp[[:space:]]+init([[:space:]]|$)'
 }
 
 invoke_wizard() {
     bin="$1"
     if ! wizard_supported "$bin"; then
         warn "This binary does not yet support the 'init' wizard (likely v0.8.1 or older)."
-        warn "Falling back to legacy setup. Run the following to wire up clients/personas:"
+        warn "Falling back to legacy setup. To wire up clients/personas, install"
+        warn "the Koshi.Agents .NET tool (the shell installer ships koshi-mcp only):"
+        warn "  dotnet tool install --global Koshi.Agents"
         warn "  koshi-agents install --client copilot   # or claude, cursor, windsurf"
         warn "When a release with the wizard ships, re-run this installer for the full flow."
         return 0
@@ -374,7 +401,7 @@ printf '\n%s\n' "$(color 36 '===== Next steps =====')"
 printf '  • Binary  : %s\n' "$DEST"
 printf '  • PATH    : %s\n' "$PREFIX"
 printf '  • Re-run  : koshi-mcp init   (re-wire clients / personas / team)\n'
-printf '  • Verify  : koshi-mcp doctor\n'
+printf '  • Verify  : koshi-mcp --list-tools\n'
 printf '  • Docs    : https://github.com/%s#readme\n\n' "$REPO"
 printf '%s\n' "$(color 33 'If you just registered a new client, restart it once to pick up the koshi MCP entry.')"
 exit "$WIZ_CODE"

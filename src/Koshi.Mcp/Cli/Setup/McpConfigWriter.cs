@@ -121,8 +121,9 @@ internal static class McpConfigWriter
                     // even if its shape differs from BuildKoshiEntry(). Users
                     // routinely customise env, tools, args, or point command at
                     // a non-PATH binary, and silently rewriting that is the
-                    // exact footgun we want to avoid. `koshi-agents doctor`
-                    // can flag missing canonical fields without us mutating.
+                    // exact footgun we want to avoid. `koshi-mcp --list-tools`
+                    // confirms the binary works; for full config-launch
+                    // validation use `koshi-agents doctor` (separate tool).
                     return new McpRegisterResult(McpRegisterOutcome.AlreadyPresent, configPath);
                 }
 

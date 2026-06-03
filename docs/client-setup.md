@@ -169,9 +169,17 @@ work today — file an issue with the client name and we will scope it.
 
 ## Verifying the registration
 
-After editing any config:
+After editing any config, smoke-test the server:
 
 ```bash
+koshi-mcp --list-tools   # confirms the binary starts and enumerates its tools
+```
+
+For a deeper check that each client config resolves correctly, install
+the companion `Koshi.Agents` .NET tool and run `doctor`:
+
+```bash
+dotnet tool install --global Koshi.Agents
 koshi-agents doctor
 ```
 

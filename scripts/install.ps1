@@ -291,29 +291,59 @@ function Test-WizardSupported([string]$binary) {
     # The `init` wizard subcommand was introduced after v0.8.1. Older
     # binaries silently fall through to launching the MCP stdio server,
     # which would hang the installer waiting for client messages on stdin.
-    # Probe `--help` and require the word `init` to be present.
-    try {
+    #
+    # We probe in two layers, each with a strict timeout so a legacy binary
+    # that ignores the argument and starts the stdio server can't hang the
+    # installer:
+    #
+    #   1. `koshi-mcp init --help` -- exit 0 AND output mentions `init` is
+    #      our authoritative signal. The exit code alone is not enough,
+    #      because an older binary might scan all args for `--help`, print
+    #      global help, and exit 0.
+    #   2. Fall back to grepping `koshi-mcp --help` for `init` either at
+    #      the start of a line OR alongside `koshi-mcp` (v0.9.0 lists it
+    #      as `  koshi-mcp init   <description>` -- the first token is
+    #      `koshi-mcp`, not `init`, which the older regex missed).
+    $probeTimeoutMs = 5000
+
+    function Invoke-HelpProbe([string]$bin, [string[]]$argv, [int]$timeoutMs) {
         $stdoutFile = [System.IO.Path]::GetTempFileName()
         $stderrFile = [System.IO.Path]::GetTempFileName()
-        $proc = Start-Process -FilePath $binary -ArgumentList '--help' `
-            -NoNewWindow -Wait -PassThru `
-            -RedirectStandardOutput $stdoutFile `
-            -RedirectStandardError $stderrFile -ErrorAction Stop
-        $help = Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue
-        if (-not $help) { $help = '' }
-        return ($proc.ExitCode -eq 0 -and $help -match '(?im)^\s*init\b')
-    } catch {
-        return $false
-    } finally {
-        Remove-Item $stdoutFile -ErrorAction SilentlyContinue
-        Remove-Item $stderrFile -ErrorAction SilentlyContinue
+        try {
+            $proc = Start-Process -FilePath $bin -ArgumentList $argv `
+                -NoNewWindow -PassThru `
+                -RedirectStandardOutput $stdoutFile `
+                -RedirectStandardError $stderrFile -ErrorAction Stop
+            if (-not $proc.WaitForExit($timeoutMs)) {
+                try { $proc.Kill() } catch { }
+                return [pscustomobject]@{ Ok = $false; Out = ''; Reason = 'timeout' }
+            }
+            $out = Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue
+            if (-not $out) { $out = '' }
+            return [pscustomobject]@{ Ok = ($proc.ExitCode -eq 0); Out = $out; Reason = "exit=$($proc.ExitCode)" }
+        } catch {
+            return [pscustomobject]@{ Ok = $false; Out = ''; Reason = $_.Exception.Message }
+        } finally {
+            Remove-Item $stdoutFile -ErrorAction SilentlyContinue
+            Remove-Item $stderrFile -ErrorAction SilentlyContinue
+        }
     }
+
+    $r = Invoke-HelpProbe $binary @('init','--help') $probeTimeoutMs
+    if ($r.Ok -and $r.Out -match '(?im)\binit\b') { return $true }
+
+    $r = Invoke-HelpProbe $binary @('--help') $probeTimeoutMs
+    if ($r.Ok -and ($r.Out -match '(?im)^\s*init\b' -or $r.Out -match '(?im)\bkoshi-mcp\s+init\b')) { return $true }
+
+    return $false
 }
 
 function Invoke-WizardInit([string]$binary) {
     if (-not (Test-WizardSupported $binary)) {
         Write-Warn2 "This binary does not yet support the 'init' wizard (likely v0.8.1 or older)."
-        Write-Warn2 "Falling back to legacy setup. Run the following to wire up clients/personas:"
+        Write-Warn2 "Falling back to legacy setup. To wire up clients/personas, install"
+        Write-Warn2 "the Koshi.Agents .NET tool (the shell installer ships koshi-mcp only):"
+        Write-Warn2 "  dotnet tool install --global Koshi.Agents"
         Write-Warn2 "  koshi-agents install --client copilot   # or claude, cursor, windsurf"
         Write-Warn2 "When a release with the wizard ships, re-run this installer for the full flow."
         return 0
@@ -391,7 +421,7 @@ try {
     Write-Host "  * Binary  : $dest"
     Write-Host "  * PATH    : $Prefix (new terminals will pick this up)"
     Write-Host "  * Re-run  : koshi-mcp init   (re-wire clients / personas / team)"
-    Write-Host "  * Verify  : koshi-mcp doctor"
+    Write-Host "  * Verify  : koshi-mcp --list-tools"
     Write-Host "  * Docs    : https://github.com/$($Script:Repo)#readme"
     Write-Host ""
     Write-Host "If you just registered a new client, restart it once to pick up the koshi MCP entry." -ForegroundColor Yellow
