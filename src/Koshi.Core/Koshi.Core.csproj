@@ -12,7 +12,7 @@
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="3.0.0-preview.26160.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="3.0.0-preview.26160.2" />
     <!-- Pin transitive Microsoft.Bcl.Memory above the vulnerable 9.0.4 (GHSA-73j8-2gch-69rq) -->
-    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.10" />
   </ItemGroup>
 
 </Project>
